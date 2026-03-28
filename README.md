@@ -2,10 +2,11 @@
 
 > Aggregates real public data from Trase, Forest 500, Global Forest Watch, and corporate CSR pages to compute deforestation risk scores for supply chains.
 
-![Phase](https://img.shields.io/badge/Phase-4%20of%205-blue)
+![Phase](https://img.shields.io/badge/Phase-5%20of%205-purple)
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-009688)
 ![Frontend](https://img.shields.io/badge/Frontend-Next.js-black)
-![Status](https://img.shields.io/badge/Status-Dashboard%20Live-green)
+![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED)
+![Status](https://img.shields.io/badge/Status-Production%20Ready-green)
 
 ## 🏗️ Current Status
 
@@ -92,6 +93,7 @@ Detailed documentation is in the [`docs/`](docs/) folder:
 - **[Phase 2: Data Integrations — Trase, Forest 500, GFW](docs/phase2.md)**
 - **[Phase 3: CSR Scraper + Risk API Endpoint](docs/phase3.md)**
 - **[Phase 4: Frontend Dashboard](docs/phase4.md)**
+- **[Phase 5: Containerization & Deployment](docs/phase5.md)**
 
 ## 🛠️ Tech Stack
 
