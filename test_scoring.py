@@ -1,29 +1,30 @@
-"""Quick test for the scoring engine."""
-from app.utils.scoring import (
-    compute_risk_score, get_risk_level,
-    compute_confidence_score, get_confidence_level,
-    generate_summary,
-)
+"""Test Phase 2 data services."""
+import asyncio
 
-commodities = [
-    {"name": "Palm Oil", "risk_weight": 0.95},
-    {"name": "Soy", "risk_weight": 0.90},
-]
-regions = [
-    {"name": "Indonesia", "iso_code": "IDN", "base_risk": 0.93},
-    {"name": "Brazil", "iso_code": "BRA", "base_risk": 0.95},
-]
+# Test GFW Service (fallback mode — no API key needed)
+from app.services.gfw_service import GFWService
 
-score, breakdown = compute_risk_score(commodities, regions)
-risk_level = get_risk_level(score)
-conf = compute_confidence_score(2, True, True)
-conf_level = get_confidence_level(conf)
+async def test_gfw():
+    gs = GFWService()
+    result = await gs.get_tree_loss("BRA")
+    print(f"[GFW] Brazil — Status: {result['status']}, Risk: {result['normalized_risk']}, Source: {result['source']}")
 
-print(f"Risk Score: {score}/100 ({risk_level})")
-print(f"Confidence: {conf}/100 ({conf_level})")
-print(f"Breakdown: {len(breakdown)} commodity x region pairs")
-for b in breakdown:
-    print(f"  {b['commodity']} x {b['region']}: {b['combined_score']}")
+    result2 = await gs.get_tree_loss("IDN")
+    print(f"[GFW] Indonesia — Status: {result2['status']}, Risk: {result2['normalized_risk']}")
 
-summary = generate_summary("TestCorp", score, risk_level, conf_level, commodities, regions)
-print(f"\nSummary: {summary}")
+    multi = await gs.get_multi_country_risk(["BRA", "IDN", "MYS", "COD"])
+    print(f"[GFW] Multi-country risks: {multi}")
+
+asyncio.run(test_gfw())
+
+# Test Trase Service (will report "not available" if no CSVs downloaded yet)
+from app.services.trase_service import TraseService
+ts = TraseService()
+result = ts.search("Cargill")
+print(f"\n[Trase] Cargill search — Status: {result['status']}")
+
+# Test Forest 500 Service (will report "not available" if no CSV downloaded yet)
+from app.services.forest500_service import Forest500Service
+fs = Forest500Service()
+result = fs.search("Unilever")
+print(f"[Forest500] Unilever search — Status: {result['status']}")
