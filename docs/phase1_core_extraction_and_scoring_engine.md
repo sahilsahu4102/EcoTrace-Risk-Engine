@@ -1,4 +1,4 @@
-# Phase 1: Core Extraction & Scoring Engine
+# Phase 1: Core Extraction and Scoring Engine
 
 ## 1. Overview
 Phase 1 establishes the foundation of the Deforestation Risk Scorer — the **extraction engine** and **scoring engine**. These components work entirely offline with no external API dependencies, making them testable and reliable from day one.

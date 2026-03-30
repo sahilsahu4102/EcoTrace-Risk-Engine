@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Search, TreePine, AlertTriangle, Globe } from "lucide-react";
+import { Search, TreePine, AlertTriangle, Globe, Clock } from "lucide-react";
 
 const SUGGESTIONS = [
   { label: "Unilever", icon: "🧴" },
@@ -11,18 +11,44 @@ const SUGGESTIONS = [
   { label: "JBS", icon: "🥩" },
   { label: "Wilmar", icon: "🌴" },
   { label: "Nestlé", icon: "☕" },
-  { label: "Mondelez", icon: "🍫" },
+  { label: "Palm Oil", icon: "🌴" },
+  { label: "Cocoa", icon: "🍫" },
+  { label: "Soy", icon: "🌾" },
 ];
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const router = useRouter();
 
+  // Load recent searches from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("ecotrace_recent");
+      if (stored) {
+        setRecentSearches(JSON.parse(stored).slice(0, 5));
+      }
+    } catch (e) {
+      console.error("Failed to load history", e);
+    }
+  }, []);
+
   const handleSearch = (company: string) => {
-    if (!company.trim()) return;
+    const term = company.trim();
+    if (!term) return;
+    
+    // Save to localStorage
+    try {
+      const updated = [term, ...recentSearches.filter(s => s.toLowerCase() !== term.toLowerCase())].slice(0, 5);
+      localStorage.setItem("ecotrace_recent", JSON.stringify(updated));
+      setRecentSearches(updated);
+    } catch (e) {
+      console.error("Failed to save history", e);
+    }
+
     setLoading(true);
-    router.push(`/results/${encodeURIComponent(company.trim())}`);
+    router.push(`/results/${encodeURIComponent(term)}`);
   };
 
   return (
@@ -34,8 +60,36 @@ export default function HomePage() {
         alignItems: "center",
         justifyContent: "center",
         padding: "40px 20px",
+        position: "relative",
       }}
     >
+      {/* Top right history button */}
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.1 }}
+        style={{ position: 'absolute', top: 24, right: 24 }}
+      >
+        <button
+           onClick={() => router.push('/history')}
+           style={{
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 20,
+              padding: '8px 16px',
+              color: 'var(--text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: '0.875rem',
+              cursor: 'pointer',
+           }}
+        >
+          <Clock size={16} />
+          Global History
+        </button>
+      </motion.div>
+
       <motion.div
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
@@ -74,10 +128,12 @@ export default function HomePage() {
             WebkitTextFillColor: "transparent",
           }}
         >
-          How risky is your
-          <br />
-          supply chain?
+          EcoTrace-Risk-Engine
         </h1>
+
+        <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: 12 }}>
+          How risky is your supply chain?
+        </div>
 
         {/* Subtitle */}
         <p
@@ -96,7 +152,7 @@ export default function HomePage() {
           </span>
         </p>
 
-        {/* Search Bar */}
+        {/* Search Bar - Flexbox fix for the generic transform clipping issue */}
         <motion.form
           onSubmit={(e) => {
             e.preventDefault();
@@ -105,26 +161,35 @@ export default function HomePage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
-          style={{ position: "relative", marginBottom: 24 }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            background: "var(--card-bg)",
+            border: "1px solid var(--border-color)",
+            borderRadius: 16,
+            padding: "8px 8px 8px 24px",
+            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.2)",
+            width: "100%",
+            maxWidth: 500,
+            margin: "0 auto 24px auto",
+          }}
         >
-          <Search
-            size={20}
-            style={{
-              position: "absolute",
-              left: 20,
-              top: "50%",
-              transform: "translateY(-50%)",
-              color: "var(--text-muted)",
-              pointerEvents: "none",
-            }}
-          />
+          <Search size={20} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Enter a company name..."
-            className="search-input"
-            style={{ paddingLeft: 52 }}
+            placeholder="Enter company name or product category (e.g., Palm Oil)..."
+            style={{ 
+              flex: 1,
+              border: "none",
+              outline: "none",
+              background: "transparent",
+              padding: "12px 16px",
+              fontSize: "1rem",
+              color: "var(--text-primary)",
+              minWidth: 0, // allows input to shrink in flex containers
+            }}
             disabled={loading}
             autoFocus
           />
@@ -135,10 +200,6 @@ export default function HomePage() {
               animate={{ opacity: 1, scale: 1 }}
               disabled={loading}
               style={{
-                position: "absolute",
-                right: 8,
-                top: "50%",
-                transform: "translateY(-50%)",
                 background: "var(--accent-emerald)",
                 color: "#fff",
                 border: "none",
@@ -147,6 +208,7 @@ export default function HomePage() {
                 fontWeight: 600,
                 cursor: "pointer",
                 fontSize: "0.875rem",
+                flexShrink: 0,
               }}
             >
               {loading ? "Analyzing..." : "Analyze"}
@@ -154,39 +216,54 @@ export default function HomePage() {
           )}
         </motion.form>
 
-        {/* Suggestion Chips */}
+        {/* Memory/History Chips Context */}
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.6 }}
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 8,
-            justifyContent: "center",
-          }}
+           initial={{ opacity: 0 }}
+           animate={{ opacity: 1 }}
+           transition={{ delay: 0.5 }}
+           style={{
+             display: "flex",
+             flexDirection: "column",
+             gap: 16,
+             alignItems: "center",
+           }}
         >
-          <span
-            style={{
-              color: "var(--text-muted)",
-              fontSize: "0.8125rem",
-              alignSelf: "center",
-              marginRight: 4,
-            }}
-          >
-            Try:
-          </span>
-          {SUGGESTIONS.map((s) => (
-            <button
-              key={s.label}
-              className="chip"
-              onClick={() => handleSearch(s.label)}
-              disabled={loading}
-            >
-              <span>{s.icon}</span>
-              {s.label}
-            </button>
-          ))}
+          {recentSearches.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+              <span style={{ color: "var(--text-muted)", fontSize: "0.8125rem", alignSelf: "center", marginRight: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                <Clock size={14} /> Recent:
+              </span>
+              {recentSearches.map((s) => (
+                <button
+                  key={`recent-${s}`}
+                  className="chip"
+                  onClick={() => handleSearch(s)}
+                  disabled={loading}
+                  style={{ background: "rgba(255, 255, 255, 0.05)" }}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Suggestion Chips */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+            <span style={{ color: "var(--text-muted)", fontSize: "0.8125rem", alignSelf: "center", marginRight: 4 }}>
+              Try:
+            </span>
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s.label}
+                className="chip"
+                onClick={() => handleSearch(s.label)}
+                disabled={loading}
+              >
+                <span>{s.icon}</span>
+                {s.label}
+              </button>
+            ))}
+          </div>
         </motion.div>
 
         {/* Stats Bar */}

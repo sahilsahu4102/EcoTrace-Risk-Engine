@@ -1,4 +1,4 @@
-# Phase 4: Frontend — Next.js Dashboard
+# Phase 4: Frontend Dashboard
 
 ## 1. Overview
 Phase 4 introduces a premium, dark-themed Next.js frontend with glassmorphic design, animated visualizations, and a responsive layout. The app consists of two pages: a **search page** and a **results dashboard**.

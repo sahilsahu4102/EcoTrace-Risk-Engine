@@ -154,14 +154,12 @@ class TraseService:
 
         # Extract commodities
         commodities = self._extract_field(filtered, [
-            "commodity", "product", "commodity_name",
+            "commodity", "product", "commodity_name", "product_type",
         ])
 
-        # Extract regions/countries
+        # Extract ONLY sourcing regions (where they buy FROM, not where they export TO)
         regions = self._extract_field(filtered, [
             "country_of_production", "country", "source_country",
-            "country_of_destination", "destination_country",
-            "municipality", "state", "biome",
         ])
 
         # Extract volumes if available

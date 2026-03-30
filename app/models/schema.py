@@ -25,6 +25,8 @@ class RegionDetail(BaseModel):
     risk_tier: str = Field(..., description="Risk tier: critical, high, moderate, lower")
     base_risk: float = Field(..., description="Base deforestation risk (0-1)")
     linked_commodities: list[str] = Field(default_factory=list, description="Commodities linked to deforestation in this region")
+    sourcing_confidence: str = Field(default="inferred", description="Confidence level: estimated, inferred (no 'confirmed' - all sourcing is probabilistic)")
+    evidence_source: str = Field(default="Global commodity-risk model", description="Where the sourcing evidence came from")
 
 
 class CommodityRegionBreakdown(BaseModel):
@@ -67,10 +69,15 @@ class RiskResponse(BaseModel):
     confidence_level: str = Field(..., description="Confidence level: high, moderate, low, very_low")
 
     commodities: list[CommodityDetail] = Field(default_factory=list, description="Detected commodities")
-    regions: list[RegionDetail] = Field(default_factory=list, description="Detected regions")
+    regions: list[RegionDetail] = Field(default_factory=list, description="Detected sourcing regions")
+    operational_regions: list[RegionDetail] = Field(default_factory=list, description="Countries where company operates but does not source from")
     breakdown: list[CommodityRegionBreakdown] = Field(default_factory=list, description="Commodity × Region risk matrix")
 
     sources: list[SourceResult] = Field(default_factory=list, description="Per-source results")
     flags: DisclosureFlags = Field(default_factory=DisclosureFlags, description="Disclosure quality flags")
 
     summary: str = Field(default="", description="Human-readable risk summary")
+    methodology_note: str = Field(
+        default="Risk assessment based on multi-source analysis: Trase supply chain trade records, CSR page AI extraction, Forest 500 policy scores, and Global Forest Watch deforestation data. Sourcing countries are classified as estimated (trade records or CSR disclosure) or inferred (global commodity-risk models). All sourcing attribution is probabilistic.",
+        description="Transparent methodology explanation"
+    )

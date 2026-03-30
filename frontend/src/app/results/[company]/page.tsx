@@ -13,6 +13,7 @@ import {
   Shield,
   BarChart3,
   Info,
+  Download,
 } from "lucide-react";
 import {
   BarChart,
@@ -29,7 +30,11 @@ import {
   Cell,
 } from "recharts";
 import { analyzeRisk, RiskResponse } from "@/lib/api";
+import dynamic from 'next/dynamic';
 
+const SupplyChainGraph = dynamic(() => import('@/components/SupplyChainGraph'), {
+  ssr: false,
+});
 const RISK_COLORS: Record<string, string> = {
   critical: "#ef4444",
   high: "#f97316",
@@ -43,6 +48,13 @@ const TIER_COLORS: Record<string, string> = {
   high: "#f97316",
   moderate: "#fbbf24",
   lower: "#4ade80",
+};
+
+const CONFIDENCE_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
+  confirmed: { icon: "✅", color: "#22c55e", label: "Confirmed" },
+  estimated: { icon: "⚠️", color: "#f59e0b", label: "Estimated" },
+  inferred: { icon: "🔍", color: "#64748b", label: "Inferred" },
+  operational_only: { icon: "🏢", color: "#475569", label: "Operations Only" },
 };
 
 function ScoreGauge({ score, level }: { score: number; level: string }) {
@@ -112,6 +124,36 @@ export default function ResultsPage() {
   const [data, setData] = useState<RiskResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportPDF = async () => {
+    setIsExporting(true);
+    const element = document.getElementById("pdf-report-container");
+    if (!element) {
+      setIsExporting(false);
+      return;
+    }
+    
+    try {
+      // Dynamically import to avoid SSR 'self is not defined' error
+      const html2pdf = (await import('html2pdf.js')).default;
+
+      // Temporarily apply white background to body for cleaner PDF
+      const opt = {
+        margin:       10,
+        filename:     `${company.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_risk_report.pdf`,
+        image:        { type: 'jpeg' as const, quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#0f172a' },
+        jsPDF:        { unit: 'mm' as const, format: 'a4', orientation: 'portrait' as const }
+      };
+
+      await html2pdf().set(opt).from(element).save();
+    } catch (err) {
+      console.error("PDF Export failed:", err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   useEffect(() => {
     analyzeRisk(company)
@@ -135,8 +177,11 @@ export default function ResultsPage() {
     risk: Math.round(r.base_risk * 100),
   }));
 
+  const csrSource = data.sources.find((s) => s.source_name === "csr");
+  const csrCommodities = csrSource?.commodities_found || [];
+
   return (
-    <main style={{ minHeight: "100vh", padding: "24px 20px", maxWidth: 1200, margin: "0 auto" }}>
+    <main id="pdf-report-container" style={{ minHeight: "100vh", padding: "24px 20px", maxWidth: 1200, margin: "0 auto" }}>
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
@@ -145,6 +190,7 @@ export default function ResultsPage() {
       >
         <button
           onClick={() => router.push("/")}
+          data-html2canvas-ignore="true"
           style={{
             background: "rgba(255,255,255,0.05)",
             border: "1px solid rgba(255,255,255,0.1)",
@@ -163,9 +209,35 @@ export default function ResultsPage() {
             Deforestation Risk Assessment
           </p>
         </div>
+
         <span className={`badge badge-${data.risk_level}`} style={{ marginLeft: "auto" }}>
           {data.risk_level}
         </span>
+
+        <button
+          onClick={handleExportPDF}
+          disabled={isExporting}
+          data-html2canvas-ignore="true"
+          style={{
+            background: "var(--accent-emerald)",
+            color: "#fff",
+            border: "none",
+            borderRadius: 8,
+            padding: "8px 16px",
+            fontSize: "0.875rem",
+            fontWeight: 600,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            opacity: isExporting ? 0.7 : 1,
+            boxShadow: "0 0 10px rgba(16, 185, 129, 0.2)",
+            marginLeft: 16,
+          }}
+        >
+          <Download size={16} />
+          {isExporting ? "Exporting..." : "Export PDF"}
+        </button>
       </motion.div>
 
       {/* Metric Cards Row */}
@@ -188,24 +260,45 @@ export default function ResultsPage() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass-card metric-card">
           <span className="metric-label">Commodities</span>
           <span className="metric-value">{data.commodities.length}</span>
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-            {data.commodities.slice(0, 3).map((c) => (
-              <span key={c.name} style={{ fontSize: "0.75rem", color: "var(--text-secondary)", background: "rgba(255,255,255,0.05)", padding: "2px 8px", borderRadius: 6 }}>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4, maxHeight: 120, overflowY: "auto" }}>
+            {data.commodities.map((c) => (
+              <span key={c.name} style={{ fontSize: "0.75rem", color: "var(--text-secondary)", background: "rgba(255,255,255,0.05)", padding: "2px 8px", borderRadius: 6, display: "flex", alignItems: "center", gap: 4 }}>
                 {c.name}
+                {csrCommodities.includes(c.name) && (
+                  <span title="Mentioned explicitly on company website">🌐</span>
+                )}
               </span>
             ))}
           </div>
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="glass-card metric-card">
-          <span className="metric-label">Regions</span>
+          <span className="metric-label">Sourcing Regions</span>
           <span className="metric-value">{data.regions.length}</span>
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-            {data.regions.slice(0, 3).map((r) => (
-              <span key={r.name} style={{ fontSize: "0.75rem", color: TIER_COLORS[r.risk_tier] || "#94a3b8", background: "rgba(255,255,255,0.05)", padding: "2px 8px", borderRadius: 6 }}>
-                {r.name}
-              </span>
-            ))}
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", maxHeight: 120, overflowY: "auto" }}>
+            {data.regions.map((r) => {
+              const conf = CONFIDENCE_CONFIG[r.sourcing_confidence] || CONFIDENCE_CONFIG.inferred;
+              return (
+                <span
+                  key={r.name}
+                  title={`${conf.label}: ${r.evidence_source}`}
+                  style={{
+                    fontSize: "0.75rem",
+                    color: TIER_COLORS[r.risk_tier] || "#94a3b8",
+                    background: "rgba(255,255,255,0.05)",
+                    padding: "2px 8px",
+                    borderRadius: 6,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 3,
+                    borderLeft: `2px solid ${conf.color}`,
+                  }}
+                >
+                  <span style={{ fontSize: "0.65rem" }}>{conf.icon}</span>
+                  {r.name}
+                </span>
+              );
+            })}
           </div>
         </motion.div>
       </div>
@@ -282,7 +375,12 @@ export default function ResultsPage() {
             <tbody>
               {data.breakdown.map((b, i) => (
                 <tr key={i}>
-                  <td style={{ fontWeight: 500, color: "var(--text-primary)" }}>{b.commodity}</td>
+                  <td style={{ fontWeight: 500, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 6 }}>
+                    {b.commodity}
+                    {csrCommodities.includes(b.commodity) && (
+                      <span title="Mentioned explicitly on company website" style={{ fontSize: "14px" }}>🌐</span>
+                    )}
+                  </td>
                   <td>
                     <span style={{ color: TIER_COLORS[data.regions.find((r) => r.name === b.region)?.risk_tier || "lower"] }}>
                       {b.region}
@@ -330,6 +428,57 @@ export default function ResultsPage() {
         </motion.div>
       )}
 
+      {/* Operational Regions (not scored) */}
+      {data.operational_regions && data.operational_regions.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.85 }} className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
+          <h3 style={{ fontSize: "0.875rem", fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            <Globe size={16} color="#64748b" />
+            Operational Presence (Not Scored)
+          </h3>
+          <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: 12 }}>
+            These countries were detected as markets, manufacturing, or office locations — NOT raw material sourcing origins. They are excluded from the risk score.
+          </p>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {data.operational_regions.map((r) => (
+              <span
+                key={r.name}
+                title={r.evidence_source}
+                style={{
+                  fontSize: "0.75rem",
+                  color: "#64748b",
+                  background: "rgba(255,255,255,0.03)",
+                  padding: "3px 10px",
+                  borderRadius: 6,
+                  border: "1px dashed rgba(255,255,255,0.08)",
+                }}
+              >
+                🏢 {r.name}
+              </span>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Methodology Note */}
+      {data.methodology_note && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.88 }} className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
+          <h3 style={{ fontSize: "0.875rem", fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            <Info size={16} color="var(--accent-blue)" />
+            Methodology
+          </h3>
+          <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", lineHeight: 1.7 }}>
+            {data.methodology_note}
+          </p>
+          <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
+            {Object.entries(CONFIDENCE_CONFIG).filter(([k]) => k !== "operational_only").map(([key, conf]) => (
+              <span key={key} style={{ fontSize: "0.7rem", color: conf.color, display: "flex", alignItems: "center", gap: 4 }}>
+                {conf.icon} {conf.label}
+              </span>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
       {/* Data Sources */}
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.0 }} className="glass-card" style={{ padding: 24 }}>
         <h3 style={{ fontSize: "0.875rem", fontWeight: 600, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
@@ -351,20 +500,56 @@ export default function ResultsPage() {
               }}
             >
               <SourceBadge status={s.status} />
-              <div>
+              <div style={{ flex: 1 }}>
                 <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-primary)", textTransform: "uppercase" }}>
                   {s.source_name}
                 </div>
-                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 2 }}>
                   {s.status === "success"
                     ? `${s.commodities_found.length + s.regions_found.length} entities found`
                     : s.error
                     ? s.error.slice(0, 50)
                     : s.status.replace("_", " ")}
                 </div>
+                
+                {s.status === "success" && s.source_name === "csr" && s.commodities_found.length > 0 && (
+                  <div style={{ marginTop: 8, fontSize: "0.75rem" }}>
+                    <div style={{ color: "var(--text-secondary)", marginBottom: 4, fontWeight: 500 }}>Website Mentions:</div>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {s.commodities_found.map(c => (
+                        <span key={c} style={{ background: "rgba(59, 130, 246, 0.15)", color: "#60a5fa", padding: "2px 6px", borderRadius: 4 }}>{c}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {s.status === "success" && s.source_name === "csr" && typeof s.raw_data?.url === "string" && (
+                  <a href={s.raw_data.url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 8, fontSize: "0.7rem", color: "var(--accent-blue)", textDecoration: "none" }}>
+                    View scraped webpage ↗
+                  </a>
+                )}
               </div>
             </div>
           ))}
+        </div>
+      </motion.div>
+
+      {/* --- Phase 7 Feature: Supply Chain Graph --- */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.6 }}
+        className="glass-card"
+        style={{ marginBottom: 24, padding: 24, marginTop: 24 }}
+      >
+        <h2 className="section-title" style={{ fontSize: "1rem", fontWeight: 600, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+          <Globe size={18} color="var(--accent-emerald)" /> Supply Chain Mapping
+        </h2>
+        <p style={{ color: "var(--text-muted)", fontSize: "0.8125rem", marginBottom: 16 }}>
+          Verified trade flows and geographical sourcing linked to {data.company}.
+        </p>
+        <div style={{ height: 400, width: "100%", position: "relative", borderRadius: 16, overflow: "hidden", border: "1px solid var(--border-color)", background: "var(--card-bg)" }}>
+          <SupplyChainGraph company={data.company} breakdown={data.breakdown} />
         </div>
       </motion.div>
     </main>

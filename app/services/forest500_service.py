@@ -207,7 +207,7 @@ class Forest500Service:
             # Check if the column has non-zero/non-null scores
             numeric = pd.to_numeric(df[col], errors="coerce")
             if numeric.sum() > 0:
-                # Extract commodity name from column name
+                # Extract commodity name from column name — ONLY use known keywords
                 for keyword in [
                     "palm oil", "soy", "beef", "cattle", "timber",
                     "pulp", "paper", "cocoa", "rubber", "coffee",
@@ -215,11 +215,7 @@ class Forest500Service:
                     if keyword in col:
                         commodities.add(keyword.title())
                         break
-                else:
-                    # Use the column name itself as commodity indicator
-                    clean_name = col.replace("_", " ").replace("score", "").strip()
-                    if clean_name:
-                        commodities.add(clean_name.title())
+                # If no keyword matched, skip it — do NOT use raw column names
 
         # Also check for text-based commodity columns
         text_cols = ["commodity", "commodities", "key_commodities"]

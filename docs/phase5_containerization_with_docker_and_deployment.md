@@ -1,4 +1,4 @@
-# Phase 5: Containerization & Deployment
+# Phase 5: Containerization with Docker and Deployment
 
 ## 1. Overview
 The final phase containerizes the entire stack (FastAPI backend + Next.js frontend) using Docker and Docker Compose. This ensures the application runs consistently across different environments and is ready for production deployment.

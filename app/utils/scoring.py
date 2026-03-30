@@ -177,7 +177,7 @@ def compute_confidence_score(
     score += 10 if has_trase else 0
     score += 5 if has_csr else 0
 
-    return min(round(score, 1), 100)
+    return min(round(score, 1), 95)  # Cap at 95 - 100% confidence is unrealistic
 
 
 def get_confidence_level(score: float) -> str:
@@ -223,13 +223,30 @@ def generate_summary(
         else:
             parts.append(f"linked to {', '.join(commodity_names[:-1])} and {commodity_names[-1]}")
 
-    if region_names:
-        if len(region_names) == 1:
-            parts.append(f"with sourcing exposure in {region_names[0]}")
-        else:
-            parts.append(f"with sourcing exposure in {', '.join(region_names[:-1])} and {region_names[-1]}")
+        if region_names:
+            # Count estimated vs inferred regions
+            estimated = [r["name"] for r in regions if r.get("sourcing_confidence") == "estimated"]
+            inferred = [r["name"] for r in regions if r.get("sourcing_confidence") == "inferred"]
+
+            if estimated:
+                parts.append(f"with estimated sourcing in {', '.join(estimated)}")
+            if inferred:
+                parts.append(f"and inferred potential sourcing in {', '.join(inferred)}")
+
+            if not estimated and not inferred:
+                # Fallback: regions without confidence field
+                if len(region_names) == 1:
+                    parts.append(f"with potential sourcing exposure in {region_names[0]}")
+                else:
+                    parts.append(f"with potential sourcing exposure in {', '.join(region_names[:-1])} and {region_names[-1]}")
 
     summary = " ".join(parts) + "."
+
+    # Add methodology note
+    summary += (
+        " Sourcing exposure is estimated using Trase commodity trade records, "
+        "CSR page AI analysis, Forest 500 policy assessments, and Global Forest Watch data."
+    )
 
     if confidence_level in ("low", "very_low"):
         summary += (
@@ -238,3 +255,4 @@ def generate_summary(
         )
 
     return summary
+
