@@ -44,7 +44,7 @@ app.add_middleware(
         "http://localhost:3001",
         "http://localhost:5173",
     ],
-    allow_origin_regex=r"http://localhost:\d+",
+    allow_origin_regex=r".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
