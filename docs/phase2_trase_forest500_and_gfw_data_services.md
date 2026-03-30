@@ -1,4 +1,4 @@
-# Phase 2: Data Integrations — Trase, Forest 500, GFW
+# Phase 2: Trase, Forest 500, and GFW Data Services
 
 ## 1. Overview
 Phase 2 connects the scoring engine to **real data sources**. Three services were built, each loading data from a different source and exposing it through a consistent search/query interface.

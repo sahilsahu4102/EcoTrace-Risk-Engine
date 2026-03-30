@@ -12,6 +12,8 @@ export interface RegionDetail {
   risk_tier: string;
   base_risk: number;
   linked_commodities: string[];
+  sourcing_confidence: string;
+  evidence_source: string;
 }
 
 export interface CommodityRegionBreakdown {
@@ -50,10 +52,12 @@ export interface RiskResponse {
   confidence_level: string;
   commodities: CommodityDetail[];
   regions: RegionDetail[];
+  operational_regions: RegionDetail[];
   breakdown: CommodityRegionBreakdown[];
   sources: SourceResult[];
   flags: DisclosureFlags;
   summary: string;
+  methodology_note: string;
 }
 
 export async function analyzeRisk(company: string): Promise<RiskResponse> {

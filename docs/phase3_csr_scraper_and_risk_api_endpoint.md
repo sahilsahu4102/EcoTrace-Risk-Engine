@@ -1,4 +1,4 @@
-# Phase 3: CSR Scraper + Risk API Endpoint
+# Phase 3: CSR Scraper and Risk API Endpoint
 
 ## 1. Overview
 Phase 3 completes the entire backend. The `/api/risk` endpoint now works **end-to-end**, orchestrating all 4 data sources concurrently and returning a comprehensive risk assessment.

@@ -116,6 +116,9 @@ class GFWService:
                 if response.status_code == 200:
                     data = response.json()
                     return self._parse_api_response(iso_code, data)
+                elif response.status_code == 422 and "require a geometry" in response.text:
+                    # GFW API dataset structural change (raster query). Suppress error and use fallback.
+                    return None
                 else:
                     print(f"[GFW] API error {response.status_code} for {iso_code}: {response.text[:200]}")
                     return None
