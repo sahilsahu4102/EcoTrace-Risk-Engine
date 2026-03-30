@@ -27,7 +27,7 @@ By combining deterministic trade data (Trase) and public policies (Forest 500) w
 ## 🚀 Core Features
 
 ### Multi-Source Risk Engine
-Calculates a unified deforestation risk score (0-100) based on intrinsic commodity risk and regional vulnerability. We track 15 key commodities and 40+ high-risk countries.
+Calculates a unified deforestation risk score (0-100) based on intrinsic commodity risk and regional vulnerability. We track 15 key commodities and 40+ high-risk countries. Users can input product categories (e.g., palm oil, soy), and the system maps them to high-risk supply chains using Trase and GFW datasets.
 
 ### LLM-Powered CSR Extraction
 Large Language Models read and extract entity data (commodities and sourcing regions) from unstructured Corporate Sustainability (CSR) and ESG pages, turning corporate PR into structured data.
@@ -45,8 +45,12 @@ A modern, glassmorphism web interface visualizes:
 - Live Global Forest Watch (GFW) tree cover loss statistics
 - A globally shared "Search History" audit log
 
-> **Note on CDP Disclosure Limitations:** 
-> Full CDP (Carbon Disclosure Project) supply chain reports are gated behind institutional memberships. Because of this limitation in fetching raw CDP reports openly, EcoTrace utilizes AI-driven scraping of public CSR/ESG pages and deterministic NGO datasets as an effective proxy for formal supply chain disclosures.
+### ⚠️ Why EcoTrace Uses AI Instead of CDP Data
+The **Carbon Disclosure Project (CDP)** is the global gold standard for corporate environmental reporting. Ideally, risk engines should just read CDP data. However, there is a major data roadblock:
+1. Detailed supply chain data submitted to the CDP is completely locked behind expensive institutional corporate memberships.
+2. The general public and open-source models cannot freely access these structured Excel/CSV reports.
+
+**The EcoTrace Solution:** To bypass this paywall, EcoTrace acts as a smart proxy scanner. Instead of relying on private CDP databases, it uses an AI (LLM) to read and comprehend the company's freely available Corporate Sustainability Reports (CSR) and ESG webpages. It extracts the exact same commodity and country links that the company would typically submit to the CDP, democratizing access to supply chain risk data.
 
 ## 💡 Key Innovation
 Most sustainability trackers rely heavily on manual data entry or isolated datasets. 
@@ -56,6 +60,19 @@ EcoTrace introduces a hybrid architecture:
 - **LLM extraction** provides real-time parsing of the latest corporate disclosures.
 
 This allows analysts and consumers to make faster, highly-explainable risk assessments.
+
+## 🧮 Score Breakdown Matrix
+
+The **Overall Risk Score (0-100)** is calculated deterministically using a matrix approach:
+
+1.  **Commodity Base Weights (0.0-1.0):** Every commodity is assigned a static risk value. For example, *Palm Oil (0.95)* and *Beef (0.92)* rank highest due to massive historical land conversion, while *Coffee (0.65)* ranks lower.
+2.  **Regional Risk Tiers (0.0-1.0):** Countries are grouped into four risk tiers (Critical, High, Moderate, Lower) driven by real-time Global Forest Watch tree-cover loss statistics. (e.g., Brazil and Indonesia = 0.95 Critical).
+3.  **Pathway Evaluation:** For every detected supply chain vector, the engine calculates:
+    > `Pathway Score = Commodity Base Weight × Regional Risk Tier × 100`
+4.  **Final Aggregation:** The final Risk Score is not a simple average. It uses a weighted calculation that pulls the company's total score heavily toward their highest-risk pathway to prevent "greenwashing" by masking high-risk sourcing with low-risk materials. A bonus reduction is applied if the entity has a strong Forest 500 policy.
+
+**What is the Confidence Score?**
+A company might look "Low Risk" (score = 15) simply because they hide all their supply chain data. The **Confidence Score (0-100)** measures the transparency of the result. It increases drastically when Trase provides exact trade volumes, Forest 500 confirms monitoring, or the LLM successfully extracts commodities explicitly admitted on the CSR ESG pages.
 
 ## 🧠 System Architecture
 
@@ -142,11 +159,12 @@ npm run dev
 ## 📖 Phase-by-Phase Development
 
 The project was built systematically to ensure data integrity:
-- **Phase 1** — Core Risk Engine & Pydantic Data Models
-- **Phase 2** — Data Integrations (Trase, Forest 500, GFW)
-- **Phase 3** — CSR Scraper & API Endpoint
-- **Phase 4** — Next.js Visual Dashboard
-- **Phase 5** — Caching, History, Tests & Production Polish
+- **Phase 1** — Core Extraction and Scoring Engine
+- **Phase 2** — Trase, Forest 500, and GFW Data Services
+- **Phase 3** — CSR Scraper and Risk API Endpoint
+- **Phase 4** — Frontend Dashboard
+- **Phase 5** — Containerization with Docker and Deployment
+- **Phase 6** — Product Categorization and Final Bug Fixes
 
 *Detailed phase outlines and scoring methodology are available in the `docs/` directory.*
 
