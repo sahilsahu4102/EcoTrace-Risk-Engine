@@ -16,6 +16,15 @@ def no_network(monkeypatch):
     assert not attempts, f"unexpected network call(s): {attempts}"
 
 
+@pytest.fixture(autouse=True)
+def no_retry_delay(monkeypatch):
+    """Upstream 429s are retried with real backoff; tests should not sleep through it."""
+    from app.services import http_retry
+
+    monkeypatch.setattr(http_retry, "BASE_DELAY", 0.0)
+    monkeypatch.setattr(http_retry, "MAX_DELAY", 0.0)
+
+
 @pytest.fixture
 def cache_db_path(tmp_path, monkeypatch):
     from app.services import cache_db

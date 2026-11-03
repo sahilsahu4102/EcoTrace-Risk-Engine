@@ -42,7 +42,7 @@ class CommodityRegionBreakdown(BaseModel):
 class SourceResult(BaseModel):
     """Result from a single data source."""
     source_name: str = Field(..., description="Name of the data source (trase, forest500, gfw, csr)")
-    status: str = Field(..., description="Status: success, partial, failed, not_configured")
+    status: str = Field(..., description="Status: success, partial, fallback, failed, not_found, not_configured")
     commodities_found: list[str] = Field(default_factory=list)
     regions_found: list[str] = Field(default_factory=list)
     raw_data: Optional[dict] = Field(default=None, description="Additional data from this source")

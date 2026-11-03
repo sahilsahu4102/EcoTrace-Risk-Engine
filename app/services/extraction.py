@@ -560,6 +560,8 @@ import json
 import httpx
 from dotenv import load_dotenv
 
+from app.services.http_retry import with_retry
+
 load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
@@ -643,7 +645,9 @@ CRITICAL RULES:
 
     try:
         async with httpx.AsyncClient(timeout=45.0) as client:
-            response = await client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+            response = await with_retry(
+                lambda: client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+            )
             
             if response.status_code == 200:
                 data = response.json()

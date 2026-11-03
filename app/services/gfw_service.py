@@ -8,6 +8,7 @@ to the local region_risk_fallback.json when the API is unavailable.
 GFW API: https://data-api.globalforestwatch.org/
 """
 
+import asyncio
 import json
 import os
 import time
@@ -15,6 +16,8 @@ from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
+
+from app.services.http_retry import with_retry
 
 load_dotenv()
 
@@ -107,10 +110,8 @@ class GFWService:
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(
-                    url,
-                    params={"sql": sql},
-                    headers=headers,
+                response = await with_retry(
+                    lambda: client.get(url, params={"sql": sql}, headers=headers)
                 )
 
                 if response.status_code == 200:
@@ -211,17 +212,21 @@ class GFWService:
         self._cache[iso_code] = data
         self._cache_timestamps[iso_code] = time.time()
 
-    async def get_multi_country_risk(self, iso_codes: list[str]) -> dict[str, float]:
-        """
-        Get normalized risk scores for multiple countries.
+    async def get_countries(self, iso_codes: list[str]) -> dict[str, dict]:
+        """Full tree-loss result per country, fetched concurrently.
 
-        Returns dict mapping ISO codes to normalized risk values (0-1).
+        Each country is an independent API call with its own 15 s timeout, so
+        querying them one after another made a five-country request wait for
+        five timeouts in a row when the API was down.
         """
-        results = {}
-        for iso in iso_codes:
-            data = await self.get_tree_loss(iso)
-            results[iso] = data.get("normalized_risk", 0.5)
-        return results
+        unique = list(dict.fromkeys(iso_codes))
+        results = await asyncio.gather(*(self.get_tree_loss(iso) for iso in unique))
+        return dict(zip(unique, results))
+
+    async def get_multi_country_risk(self, iso_codes: list[str]) -> dict[str, float]:
+        """Normalized risk (0-1) per ISO code."""
+        countries = await self.get_countries(iso_codes)
+        return {iso: data.get("normalized_risk", 0.5) for iso, data in countries.items()}
 
     @property
     def has_api_key(self) -> bool:

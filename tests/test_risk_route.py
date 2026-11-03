@@ -16,6 +16,11 @@ TRASE_SOY_BRAZIL = {"status": "found", "commodities": ["Soy"], "regions": ["Braz
                     "total_records": 1, "volumes": {}, "deforestation_indicators": {}}
 
 
+def _gfw(status="live_api", **risk_by_iso):
+    """What GFWService.get_countries returns, for the given ISO -> risk values."""
+    return {iso: {"status": status, "normalized_risk": risk} for iso, risk in risk_by_iso.items()}
+
+
 @pytest.fixture
 def sources(cache_db_path, monkeypatch):
     """Every upstream the /api/risk route touches, mocked; defaults to 'nothing found'."""
@@ -29,7 +34,7 @@ def sources(cache_db_path, monkeypatch):
     monkeypatch.setattr(risk.scraper, "scrape", src.scrape)
     monkeypatch.setattr(risk.trase_service, "search", src.trase)
     monkeypatch.setattr(risk.forest500_service, "search", src.forest500)
-    monkeypatch.setattr(risk.gfw_service, "get_multi_country_risk", src.gfw)
+    monkeypatch.setattr(risk.gfw_service, "get_countries", src.gfw)
     monkeypatch.setattr(extraction, "extract_entities", src.extract)
     return src
 
@@ -47,7 +52,7 @@ def test_csr_timeout_leaves_other_sources_intact(sources):
     sources.trase.return_value = TRASE_SOY_BRAZIL
     sources.forest500.return_value = {"status": "found", "commodities": ["Palm Oil"], "policy_score": 70.0,
                                       "matched_names": ["Acme"], "category_scores": {}, "metadata": {}}
-    sources.gfw.return_value = {"BRA": 0.8}
+    sources.gfw.return_value = _gfw(BRA=0.8)
 
     resp = _analyze()
 
@@ -70,7 +75,7 @@ def test_crashing_source_is_isolated(sources):
         regions=[_region_to_dict(ghana, "estimated", "test")],
         operational_regions=[],
     )
-    sources.gfw.return_value = {"GHA": 0.5}
+    sources.gfw.return_value = _gfw(GHA=0.5)
 
     resp = _analyze()
 
@@ -90,6 +95,41 @@ def test_gfw_failure_falls_back_to_base_region_risk(sources):
     assert _status(resp)["gfw"] == "failed"
     assert resp.flags.no_gfw_data
     assert resp.risk_score == round(0.90 * 0.95 * 100, 1)  # Brazil base_risk 0.95
+
+
+def test_static_fallback_is_not_reported_as_gfw_responding(sources):
+    """Fallback numbers still feed the score, but earn no 'success' and no confidence points."""
+    sources.trase.return_value = TRASE_SOY_BRAZIL
+    sources.gfw.return_value = _gfw("fallback", BRA=0.95)
+    from_fallback = _analyze("Acme")
+
+    sources.gfw.return_value = _gfw(BRA=0.95)
+    from_live = _analyze("Acme Live")
+
+    assert _status(from_fallback)["gfw"] == "fallback"
+    assert from_fallback.flags.no_gfw_data
+    assert from_fallback.risk_score == from_live.risk_score
+    assert from_fallback.confidence_score < from_live.confidence_score
+
+
+def test_mixed_live_and_fallback_countries_are_partial(sources):
+    sources.trase.return_value = {**TRASE_SOY_BRAZIL, "regions": ["Brazil", "Indonesia"]}
+    sources.gfw.return_value = {**_gfw(BRA=0.8), **_gfw("fallback", IDN=0.9)}
+
+    gfw = next(s for s in _analyze().sources if s.source_name == "gfw")
+
+    assert gfw.status == "partial"
+    assert gfw.raw_data["live_countries"] == ["BRA"]
+
+
+def test_category_search_reports_live_gfw_as_success(sources):
+    """_analyze_company_direct dropped the GFW result and always reported 'failed'."""
+    sources.trase.return_value = TRASE_SOY_BRAZIL
+    sources.gfw.return_value = _gfw(BRA=0.8)
+
+    resp = asyncio.run(risk._analyze_company_direct("Acme", skip_csr=True))
+
+    assert _status(resp)["gfw"] == "success"
 
 
 def test_repeat_query_is_served_from_cache(sources):

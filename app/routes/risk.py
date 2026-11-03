@@ -108,21 +108,7 @@ async def analyze_risk(request: RiskRequest):
     extraction = _merge_structured_extraction(csr_result, trase_result, forest500_result)
 
     # Get GFW data for detected regions
-    gfw_overrides = {}
-    gfw_result = _error_source("gfw", "No regions detected")
-    if extraction.regions:
-        iso_codes = [r["iso_code"] for r in extraction.regions]
-        try:
-            gfw_overrides = await gfw_service.get_multi_country_risk(iso_codes)
-            gfw_result = {
-                "source_name": "gfw",
-                "status": "success",
-                "commodities_found": [],
-                "regions_found": list(gfw_overrides.keys()),
-                "raw_data": {"risk_by_country": gfw_overrides},
-            }
-        except Exception as e:
-            gfw_result = _error_source("gfw", str(e))
+    gfw_overrides, gfw_result = await _gfw_source([r["iso_code"] for r in extraction.regions])
 
     # Get Forest 500 policy score for scoring adjustment
     forest500_score = None
@@ -243,22 +229,7 @@ async def _analyze_commodity_category(query: str) -> RiskResponse:
         if commodity_name in r.linked_commodities
     ]
 
-    iso_codes = [r.iso_code for r in linked_regions]
-    gfw_overrides = {}
-    gfw_result = _error_source("gfw", "No regions detected")
-    
-    if iso_codes:
-        try:
-            gfw_overrides = await gfw_service.get_multi_country_risk(iso_codes)
-            gfw_result = {
-                "source_name": "gfw",
-                "status": "success",
-                "commodities_found": [],
-                "regions_found": list(gfw_overrides.keys()),
-                "raw_data": {"risk_by_country": gfw_overrides},
-            }
-        except Exception as e:
-            gfw_result = _error_source("gfw", str(e))
+    gfw_overrides, gfw_result = await _gfw_source([r.iso_code for r in linked_regions])
 
     regions_data = []
     for r in linked_regions:
@@ -363,14 +334,7 @@ async def _analyze_company_direct(company: str, skip_csr: bool = False) -> RiskR
 
     extraction = _merge_structured_extraction(csr_result, trase_result, forest500_result)
 
-    gfw_overrides = {}
-    gfw_result = _error_source("gfw", "No regions detected")
-    if extraction.regions:
-        iso_codes = [r["iso_code"] for r in extraction.regions]
-        try:
-            gfw_overrides = await gfw_service.get_multi_country_risk(iso_codes)
-        except Exception as e:
-            gfw_result = _error_source("gfw", str(e))
+    gfw_overrides, gfw_result = await _gfw_source([r["iso_code"] for r in extraction.regions])
 
     forest500_score = None
     if isinstance(forest500_result, dict) and forest500_result.get("status") == "success":
@@ -639,6 +603,38 @@ def _merge_structured_extraction(csr: dict, trase: dict, forest500: dict):
         regions=list(seen_regions.values()),
         operational_regions=list(seen_operational.values()),
     )
+
+
+async def _gfw_source(iso_codes: list[str]) -> tuple[dict[str, float], dict]:
+    """GFW risk per country, plus a source result that says how much of it was live.
+
+    The service answers from region_risk_fallback.json when the API fails, so a
+    returned value alone does not mean GFW responded. Only live API data earns
+    the source its "success" status and its confidence points; static estimates
+    are reported as "fallback".
+    """
+    if not iso_codes:
+        return {}, _error_source("gfw", "No regions detected")
+    try:
+        countries = await gfw_service.get_countries(iso_codes)
+    except Exception as e:
+        return {}, _error_source("gfw", str(e))
+
+    overrides = {iso: data.get("normalized_risk", 0.5) for iso, data in countries.items()}
+    live = [iso for iso, data in countries.items() if data.get("status") == "live_api"]
+    if len(live) == len(countries):
+        status = "success"
+    elif live:
+        status = "partial"
+    else:
+        status = "fallback"
+    return overrides, {
+        "source_name": "gfw",
+        "status": status,
+        "commodities_found": [],
+        "regions_found": list(overrides),
+        "raw_data": {"risk_by_country": overrides, "live_countries": live},
+    }
 
 
 def _error_source(name: str, error: str) -> dict:

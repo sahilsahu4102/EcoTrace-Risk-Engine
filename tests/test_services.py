@@ -9,6 +9,7 @@ import pytest
 from app.services import cache_db
 from app.services.forest500_service import Forest500Service
 from app.services.gfw_service import GFWService
+from app.services.http_retry import MAX_ATTEMPTS
 from app.services.scraper import CSRScraper
 from app.services.trase_service import TraseService
 
@@ -149,8 +150,8 @@ def test_gfw_live_response_is_normalized_and_cached(gfw, http_get):
 
 @pytest.mark.parametrize(
     "outcome",
-    [httpx.Response(429, text="Too Many Requests"), httpx.Response(500, text="boom"), httpx.ReadTimeout("slow")],
-    ids=["rate-limited", "server-error", "timeout"],
+    [httpx.Response(500, text="boom"), httpx.ReadTimeout("slow")],
+    ids=["server-error", "timeout"],
 )
 def test_gfw_failures_fall_back_to_local_data_without_retry(gfw, http_get, outcome):
     if isinstance(outcome, Exception):
@@ -165,6 +166,36 @@ def test_gfw_failures_fall_back_to_local_data_without_retry(gfw, http_get, outco
     assert http_get.await_count == 1
     asyncio.run(gfw.get_tree_loss("BRA"))
     assert http_get.await_count == 2  # fallbacks are not cached, so the next call retries the API
+
+
+def test_gfw_rate_limit_is_retried_then_falls_back(gfw, http_get):
+    http_get.return_value = httpx.Response(429, text="Too Many Requests")
+    assert asyncio.run(gfw.get_tree_loss("BRA"))["status"] == "fallback"
+    assert http_get.await_count == MAX_ATTEMPTS
+
+
+def test_gfw_recovers_after_a_rate_limit(gfw, http_get):
+    http_get.side_effect = [
+        httpx.Response(429, headers={"Retry-After": "2"}),
+        httpx.Response(200, json={"data": [{"umd_tree_cover_loss__year": 2020, "total_loss_ha": 10}]}),
+    ]
+    assert asyncio.run(gfw.get_tree_loss("BRA"))["status"] == "live_api"
+
+
+def test_gfw_countries_are_fetched_concurrently(gfw, monkeypatch):
+    events = []
+
+    async def fake_tree_loss(iso):
+        events.append(f"start {iso}")
+        await asyncio.sleep(0)
+        events.append(f"end {iso}")
+        return {"status": "live_api", "normalized_risk": 0.1}
+
+    monkeypatch.setattr(gfw, "get_tree_loss", fake_tree_loss)
+    countries = asyncio.run(gfw.get_countries(["BRA", "IDN", "BRA"]))
+
+    assert list(countries) == ["BRA", "IDN"]  # duplicates fetched once
+    assert events[:2] == ["start BRA", "start IDN"]  # both in flight before either finishes
 
 
 def test_gfw_without_key_never_calls_api(gfw, http_get):
@@ -234,7 +265,7 @@ def test_scrapingdog_rate_limit_falls_back_to_direct_fetch(http_get):
     res = asyncio.run(scraper._fetch_and_extract("https://www.acme.com/sustainability"))
 
     assert res["source"] == "direct"
-    assert http_get.await_count == 2
+    assert http_get.await_count == MAX_ATTEMPTS + 1  # Scrapingdog retried, then one direct fetch
 
 
 def test_extract_text_drops_scripts_and_page_chrome():

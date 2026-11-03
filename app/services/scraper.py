@@ -16,6 +16,8 @@ import httpx
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
+from app.services.http_retry import with_retry
+
 load_dotenv()
 
 
@@ -144,7 +146,7 @@ class CSRScraper:
 
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.get(scrapingdog_url, params=params)
+                response = await with_retry(lambda: client.get(scrapingdog_url, params=params))
                 if response.status_code == 200:
                     text = self._extract_text(response.text)
                     if text and len(text) > 100:
