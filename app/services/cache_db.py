@@ -3,8 +3,8 @@ import json
 import os
 from datetime import datetime
 
-# Path to local sqlite cache
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "risk_cache.db")
+# Path to local sqlite cache (RISK_CACHE_DB overrides it, e.g. for tests and benchmarks)
+DB_PATH = os.getenv("RISK_CACHE_DB") or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "risk_cache.db")
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
