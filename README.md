@@ -36,7 +36,7 @@ Large Language Models read and extract entity data (commodities and sourcing reg
 Returns a dedicated "Confidence Score" based on the density of corroborating public records, explicitly flagging companies with zero disclosed sourcing information.
 
 ### Sub-second Caching Layer
-An embedded SQLite caching layer natively stores and serves previously analyzed supply chains, slashing API latency from ~60 seconds to single-digit milliseconds for repeat queries.
+An embedded SQLite caching layer stores and serves previously analyzed supply chains. Repeat queries return in 3.2 ms (median, n = 25) against 52–174 s for an uncached query (median 103 s, n = 5); see [docs/cache_benchmark.md](docs/cache_benchmark.md).
 
 ### Interactive Next.js Dashboard
 A modern, glassmorphism web interface visualizes:
