@@ -391,3 +391,26 @@ def test_recent_history_is_newest_first_and_limited(cache_db_path):
         with sqlite3.connect(cache_db_path) as conn:
             conn.execute("UPDATE risk_cache SET created_at = datetime('now', ?) WHERE query = ?", (f"-{10 - i} minutes", q))
     assert [r["query"] for r in cache_db.get_recent_history(2)] == ["C", "B"]
+
+
+def test_trase_ignores_legal_forms_and_rejects_loose_fuzzy_matches(tmp_path):
+    entities = {
+        "unilever indonesia": {"names": ["UNILEVER INDONESIA"], "total_records": 1, "commodities": ["Palm Oil"],
+                               "regions": ["INDONESIA"], "pairs": [["Palm Oil", "INDONESIA", 9.0]]},
+        "universal svs llc": {"names": ["UNIVERSAL SVS LLC"], "total_records": 1, "commodities": ["Beef / Cattle"],
+                              "regions": ["BRAZIL"], "pairs": [["Beef / Cattle", "BRAZIL", 1.0]]},
+    }
+    data = {"company_names": [n for e in entities.values() for n in e["names"]], "companies": entities}
+    svc = TraseService(data_dir=str(tmp_path / "raw"), preprocessed_path=_write_json(tmp_path, "t.json", data))
+
+    assert svc.search("Unilever PLC")["matched_names"] == ["UNILEVER INDONESIA"]
+    assert svc.search("PT Unilever Tbk")["matched_names"] == ["UNILEVER INDONESIA"]
+    assert svc.search("Univerzal Foods")["status"] == "not_found"  # no longer a fuzzy hit
+
+
+def test_trase_query_is_never_stripped_to_a_generic_word():
+    from app.services.trase_service import _strip_legal_forms
+
+    assert _strip_legal_forms("wilmar international limited") == "wilmar"
+    assert _strip_legal_forms("marfrig global foods s a") == "marfrig"
+    assert _strip_legal_forms("global foods") == "global foods"

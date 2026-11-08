@@ -26,6 +26,35 @@ def _normalize(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", ascii_name.lower()).strip()
 
 
+# Legal forms dropped from the ends of a query: Trase names rarely carry them, so
+# "Unilever PLC" found no whole-word match and fell through to the fuzzy match,
+# which picked "UNIVERSAL SVS LLC".
+_LEGAL_FORMS = {
+    "plc", "inc", "incorporated", "ltd", "limited", "llc", "sa", "s", "a", "ag", "nv", "bv",
+    "corp", "corporation", "co", "company", "group", "holdings", "holding", "gmbh", "spa",
+    "tbk", "pt", "the",
+    # descriptive tails: Trase files Wilmar's palm-oil subsidiaries as "WILMAR NABATI ...",
+    # so "Wilmar International" matched only 5 minor entities
+    "international", "global", "foods", "food",
+}
+
+
+def _strip_legal_forms(query: str) -> str:
+    """'pt wilmar international tbk' -> 'wilmar'.
+
+    Never strips a query down to a generic word: "global foods" stays as it is
+    rather than becoming "global", which would match hundreds of companies.
+    """
+    words = query.split()
+    while len(words) > 1 and words[-1] in _LEGAL_FORMS:
+        words.pop()
+    while len(words) > 1 and words[0] in _LEGAL_FORMS:
+        words.pop(0)
+    if len(words) == 1 and words[0] in _LEGAL_FORMS:
+        return query
+    return " ".join(words)
+
+
 class TraseService:
     """Service for querying Trase supply chain data."""
 
@@ -164,8 +193,10 @@ class TraseService:
         5-closest-names fuzzy match is only the fallback, because on its own it
         dropped most of a group's subsidiaries.
         """
+        # The fuzzy fallback needs a near-identical name: at the old 0.6 cutoff it
+        # matched unrelated companies that merely share letters.
         matches = self._word_matches(company) or get_close_matches(
-            company.lower(), [n.lower() for n in self._company_names], n=5, cutoff=cutoff
+            company.lower(), [n.lower() for n in self._company_names], n=5, cutoff=max(cutoff, 0.85)
         )
 
         if not matches:
@@ -241,7 +272,7 @@ class TraseService:
 
     def _word_matches(self, company: str) -> list[str]:
         """Entity keys whose normalized name contains the normalized query as whole words."""
-        query = _normalize(company)
+        query = _strip_legal_forms(_normalize(company))
         if len(query) < 3:
             return []
         pattern = re.compile(rf"\b{re.escape(query)}\b")

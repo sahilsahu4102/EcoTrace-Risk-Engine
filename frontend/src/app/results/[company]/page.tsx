@@ -510,7 +510,9 @@ export default function ResultsPage() {
                   {s.source_name}
                 </div>
                 <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 2 }}>
-                  {s.status === "success"
+                  {s.status === "success" && s.source_name === "csr" && s.commodities_found.length + s.regions_found.length === 0
+                    ? "Page read; it names no commodities or countries"
+                    : s.status === "success"
                     ? `${s.commodities_found.length + s.regions_found.length} entities found`
                     : s.error
                     ? s.error.slice(0, 50)
