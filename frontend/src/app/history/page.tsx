@@ -101,7 +101,9 @@ export default function HistoryPage() {
            </div>
         ) : (
           filteredHistory.map((item, idx) => {
-            const date = new Date(item.created_at);
+            // SQLite stores UTC as "YYYY-MM-DD HH:MM:SS" with no zone, which browsers read as local
+            // time: in India every entry looked 5.5 hours old.
+            const date = new Date(item.created_at.replace(" ", "T") + "Z");
             const timeAgo = Math.floor((Date.now() - date.getTime()) / 60000);
             const timeString = timeAgo < 60 ? `${timeAgo}m ago` : timeAgo < 1440 ? `${Math.floor(timeAgo/60)}h ago` : `${Math.floor(timeAgo/1440)}d ago`;
 
