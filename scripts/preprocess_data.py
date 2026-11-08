@@ -25,6 +25,23 @@ import pandas as pd
 
 # ─── TRASE ─────────────────────────────────────────────────────
 
+# File-name keyword -> EcoTrace commodity name (app/services/extraction.py COMMODITIES)
+_FILE_COMMODITIES = {
+    "palm_oil": "Palm Oil", "soy": "Soy", "beef": "Beef / Cattle", "cattle": "Beef / Cattle",
+    "cocoa": "Cocoa", "coffee": "Coffee", "timber": "Timber", "pulp": "Pulp & Paper",
+    "rubber": "Rubber", "corn": "Maize / Corn", "maize": "Maize / Corn", "shrimp": "Shrimp / Aquaculture",
+}
+
+
+def _commodity_from_file(basename: str) -> str | None:
+    """'cote_divoire_cocoa_v1_1_1.csv' -> 'Cocoa'."""
+    name = basename.lower()
+    for key, commodity in _FILE_COMMODITIES.items():
+        if f"_{key}" in name:
+            return commodity
+    return None
+
+
 def preprocess_trase(data_dir: str = "data/trase") -> dict:
     """
     Read all Trase CSVs and pre-compute per-company lookup data using groupby.
@@ -39,14 +56,18 @@ def preprocess_trase(data_dir: str = "data/trase") -> dict:
         print(f"[Trase] No CSV files found in: {csv_path}")
         return {}
 
-    # Identify which name/commodity/region/volume columns exist across files
+    # Identify which name/volume columns exist across files.
+    # Each Trase file covers ONE commodity from ONE production country (its name says
+    # which, e.g. ghana_cocoa_v0_0_2.csv), so the commodity comes from the file name
+    # and the country only from `country_of_production`. Until 2026-11 a generic
+    # `country` column was also read, and in bolivia_soy it is the DESTINATION
+    # country, which made Chile, Peru, Uruguay and Venezuela look like soy origins.
     name_columns = [
         "exporter", "importer", "company", "trader",
         "exporter_name", "importer_name", "company_name",
-        "exporter_group", "importer_group",
+        "exporter_group", "importer_group", "trader_group",
     ]
-    commodity_columns = ["commodity", "product", "commodity_name", "product_type"]
-    region_columns = ["country_of_production", "country", "source_country"]
+    region_columns = ["country_of_production"]
     volume_columns = ["volume", "fob", "trade_value", "quantity", "soy_equivalent_tonnes", "tonnes"]
 
     companies: dict[str, dict] = {}  # lowercase name -> aggregated data
@@ -65,8 +86,12 @@ def preprocess_trase(data_dir: str = "data/trase") -> dict:
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
         print(f"  Rows: {len(df)}, Columns: {len(df.columns)}")
 
+        commodity = _commodity_from_file(basename)
+        if commodity is None:
+            print(f"  WARN: no known commodity in the file name, skipping.")
+            continue
+
         present_name_cols = [c for c in name_columns if c in df.columns]
-        present_commodity_cols = [c for c in commodity_columns if c in df.columns]
         present_region_cols = [c for c in region_columns if c in df.columns]
         present_volume_cols = [c for c in volume_columns if c in df.columns]
         deforestation_cols = [
@@ -105,6 +130,7 @@ def preprocess_trase(data_dir: str = "data/trase") -> dict:
                         "names": set(),
                         "commodities": set(),
                         "regions": set(),
+                        "pairs": {},
                         "total_records": 0,
                         "volumes": {},
                         "deforestation_indicators": {},
@@ -113,16 +139,18 @@ def preprocess_trase(data_dir: str = "data/trase") -> dict:
                 entry = companies[lower_name]
                 entry["names"].add(original_name)
                 entry["total_records"] += len(group)
+                entry["commodities"].add(commodity)
 
-                # Commodities
-                for col in present_commodity_cols:
-                    vals = group[col].dropna().unique()
-                    entry["commodities"].update(str(v).strip() for v in vals if str(v).strip())
-
-                # Regions
+                # Production countries, each paired with this file's commodity
+                tonnes = pd.to_numeric(group["volume"], errors="coerce") if "volume" in group else None
                 for col in present_region_cols:
-                    vals = group[col].dropna().unique()
-                    entry["regions"].update(str(v).strip() for v in vals if str(v).strip())
+                    for country, rows in group.groupby(group[col].astype(str).str.strip()):
+                        if not country or country.lower() in ("nan", "unknown"):
+                            continue
+                        entry["regions"].add(country)
+                        key = f"{commodity}|{country}"
+                        vol = float(tonnes.loc[rows.index].sum()) if tonnes is not None else 0.0
+                        entry["pairs"][key] = round(entry["pairs"].get(key, 0.0) + vol, 2)
 
                 # Volumes
                 for col in present_volume_cols:
@@ -168,6 +196,8 @@ def preprocess_trase(data_dir: str = "data/trase") -> dict:
         entry["names"] = sorted(entry["names"])
         entry["commodities"] = sorted(entry["commodities"])
         entry["regions"] = sorted(entry["regions"])
+        # [commodity, production country, tonnes] — the only pairs scoring may use
+        entry["pairs"] = [[*k.split("|", 1), v] for k, v in sorted(entry["pairs"].items())]
         all_names.update(entry["names"])
         # Recalculate mean for merged volumes
         for vc in entry["volumes"]:

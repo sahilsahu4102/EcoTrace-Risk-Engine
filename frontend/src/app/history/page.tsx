@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Search, ArrowLeft, Clock, Activity, ShieldAlert, CheckCircle2 } from "lucide-react";
+import { API_BASE } from "@/lib/api";
 
 interface HistoryItem {
   query: string;
@@ -21,7 +22,7 @@ export default function HistoryPage() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/history")
+    fetch(`${API_BASE}/api/history`)
       .then((res) => res.json())
       .then((data) => {
         setHistory(data.history || []);

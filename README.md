@@ -7,7 +7,7 @@ An intelligent, multi-source risk assessment platform that helps consumers and e
 ![Frontend](https://img.shields.io/badge/Frontend-Next.js-black)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 
-🎥 **[Watch the Full Product Demo Video Here](https://drive.google.com/file/d/1NmSob4oo__kMoqJXP2d5VNSBq-QMZX0c/view?usp=sharing)**
+🎥 **[Watch the Full Product Demo Video Here](https://drive.google.com/file/d/1NmSob4oo__kMoqJXP2d5VNSBq-QMZX0c/view?usp=sharing)** · 🌐 **[Live demo](https://eco-trace-risk-engine.vercel.app)** (the API runs on Render's free tier, which sleeps when idle: a first request after a quiet spell can take a minute)
 
 ---
 
@@ -36,7 +36,7 @@ Large Language Models read and extract entity data (commodities and sourcing reg
 Returns a dedicated "Confidence Score" based on the density of corroborating public records, explicitly flagging companies with zero disclosed sourcing information.
 
 ### Sub-second Caching Layer
-An embedded SQLite caching layer stores and serves previously analyzed supply chains. Repeat queries return in 3.2 ms (median, n = 25) against 52–174 s for an uncached query (median 103 s, n = 5); see [docs/cache_benchmark.md](docs/cache_benchmark.md).
+An embedded SQLite caching layer stores and serves previously analyzed supply chains. Repeat queries return in 3.2 ms (median, n = 25) against 52–174 s for an uncached query (median 103 s, n = 5) before the November 2026 scraper fix; see [docs/cache_benchmark.md](docs/cache_benchmark.md). After it, the eight home-page examples took 3–36 s uncached on a laptop (companies 17–36 s, commodity categories 3–11 s). Results older than a day are still returned at once and recomputed in the background, and the examples ship pre-computed, because the free host's disk resets on every restart.
 
 ### Interactive Next.js Dashboard
 A modern, glassmorphism web interface visualizes:
@@ -66,26 +66,43 @@ This allows analysts and consumers to make faster, highly-explainable risk asses
 The **Overall Risk Score (0-100)** is calculated deterministically using a matrix approach:
 
 1.  **Commodity Base Weights (0.0-1.0):** Every commodity is assigned a static risk value. For example, *Palm Oil (0.95)* and *Beef (0.92)* rank highest due to massive historical land conversion, while *Coffee (0.65)* ranks lower.
-2.  **Regional Risk Tiers (0.0-1.0):** Countries are grouped into four risk tiers (Critical, High, Moderate, Lower) driven by real-time Global Forest Watch tree-cover loss statistics. (e.g., Brazil and Indonesia = 0.95 Critical).
-3.  **Pathway Evaluation:** For every detected supply chain vector, the engine calculates:
-    > `Pathway Score = Commodity Base Weight × Regional Risk Tier × 100`
-4.  **Final Aggregation:** The final Risk Score is not a simple average. It uses a weighted calculation that pulls the company's total score heavily toward their highest-risk pathway to prevent "greenwashing" by masking high-risk sourcing with low-risk materials. A bonus reduction is applied if the entity has a strong Forest 500 policy.
+2.  **Regional Risk Tiers (0.0-1.0):** Countries are grouped into four expert risk tiers (Critical, High, Moderate, Lower), e.g. Brazil 0.95 and Indonesia 0.93. Live Global Forest Watch data moves a country's value by up to ±0.1: the mean tree cover loss of the last three years against the country's own 2011-2020 mean.
+3.  **Pathway Evaluation:** For every commodity-country pair the evidence supports, the engine calculates:
+    > `Pathway Score = Commodity Base Weight × Regional Risk × 100`
+
+    A pair is supported when Trase records that commodity leaving that country for the company, or when the country is a known producer of the commodity. Other combinations of the commodities and countries found (such as palm oil × Chile) are not scored.
+4.  **Final Aggregation:** The Risk Score is the average of the pathway scores. Forest 500 policy scores then adjust it: +5 for a score of 20 or below, +2 up to 60, -10 from 80.
 
 **What is the Confidence Score?**
 A company might look "Low Risk" (score = 15) simply because they hide all their supply chain data. The **Confidence Score (0-100)** measures the transparency of the result. It increases drastically when Trase provides exact trade volumes, Forest 500 confirms monitoring, or the LLM successfully extracts commodities explicitly admitted on the CSR ESG pages.
+
+## 🔧 November 2026 data fixes
+
+Using the live demo the way a visitor would turned up six problems, each fixed and covered by tests (103 in total):
+
+| Problem | Fix |
+|---|---|
+| Every commodity was scored against every country found, so results showed "Palm Oil × Chile" | Only pairs backed by a Trase trade record or a known producer country are scored |
+| Trase countries included destination countries (Bolivia's file names the importer in `country`), and cocoa entities had no commodity | `scripts/preprocess_data.py` now takes the country from `country_of_production` and the commodity from the dataset's file name, and keeps per-entity (commodity, country, tonnes) pairs |
+| Company search kept only the 5 closest Trase names, dropping most of a group's subsidiaries (Cargill's Côte d'Ivoire cocoa entities) | Every entity whose name contains the query as whole words is matched, accent-insensitive |
+| GFW never returned live data: the raster dataset refuses country queries without a geometry, and the error was swallowed | GFW's per-country summary tables (`gadm__tcl__iso_change`, `gadm__integrated_alerts__iso_daily_alerts`) |
+| The CSR source tried 44 URLs one by one through a Scrapingdog plan with no requests left: about 37 s, always "not found" | Up to 6 likely URLs concurrently, direct first and then the Jina Reader, within 25 s |
+| LLM extraction called a paid model on an account without credits, so it always fell back to keywords | Free OpenRouter models are tried in turn after a 402, 404 or 429 |
 
 ## 🧠 System Architecture
 
 ```text
 User Search (Company or Category)
    ↓
-API Rate Limiter & Cache Check
+API Rate Limiter & Cache Check (a cached result returns at once; one older than a day is refreshed in the background)
    ↓
 Parallel Data Orchestration (asyncio)
-  ├── Trase Trade Data (CSV)
-  ├── Forest 500 Policies (CSV)
-  ├── GFW Tree Cover Loss (REST API)
-  └── CSR Page Scraper → LLM Extraction
+  ├── Trase trade records (8 country-commodity datasets, preprocessed JSON)
+  ├── Forest 500 policy scores (preprocessed JSON)
+  ├── GFW Data API: tree cover loss per country + deforestation alerts in natural forest (last 90 days)
+  └── CSR page (direct HTTP, then Jina Reader) → LLM extraction (OpenRouter, free-model fallback chain)
+   ↓
+Commodity-country pairs supported by the evidence
    ↓
 Risk & Confidence Scoring Engine
    ↓
@@ -123,7 +140,7 @@ ecotrace/
 ### 1️⃣ Prerequisites
 - Python 3.10+
 - Node.js 18+
-- API Keys: Global Forest Watch, Scrapingdog, OpenRouter (Gemini/Llama)
+- API keys: Global Forest Watch (free) and OpenRouter (free models work; `OPENROUTER_MODEL` can name a paid one, tried first). Company pages are read through the keyless Jina Reader.
 
 ### 2️⃣ Backend Setup
 Navigate to the root directory and install dependencies:

@@ -37,6 +37,25 @@ def get_cached_risk(query: str):
             return json.loads(row["response_json"])
     return None
 
+def get_cached_entry(query: str):
+    """(response, fresh) for a query of any age, or None.
+
+    Lets the route answer instantly from an old result while it refreshes in the
+    background. On Render's free tier the disk resets to the committed database
+    on every restart, so without this every result older than a day cost the
+    next visitor the full 20-100 s of live source calls.
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT response_json, created_at > datetime('now', '-1 day') AS fresh
+            FROM risk_cache WHERE lower(query) = lower(?)
+            """, (query,)
+        ).fetchone()
+    return (json.loads(row["response_json"]), bool(row["fresh"])) if row else None
+
+
 def save_cached_risk(query: str, risk_score: float, risk_level: str, confidence_score: float, confidence_level: str, response_dict: dict):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(

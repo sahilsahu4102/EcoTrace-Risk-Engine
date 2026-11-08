@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export interface CommodityDetail {
   name: string;
@@ -23,6 +23,7 @@ export interface CommodityRegionBreakdown {
   commodity_weight: number;
   region_risk: number;
   combined_score: number;
+  evidence?: string | null;
 }
 
 export interface SourceResult {
@@ -57,6 +58,7 @@ export interface RiskResponse {
   sources: SourceResult[];
   flags: DisclosureFlags;
   summary: string;
+  computed_at?: string | null;
   methodology_note: string;
 }
 

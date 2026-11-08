@@ -12,10 +12,18 @@ Trase data: https://supplychains.trase.earth/
 
 import os
 import json
+import re
+import unicodedata
 from difflib import get_close_matches
 from typing import Optional
 
 import pandas as pd
+
+
+def _normalize(name: str) -> str:
+    """'Nestlé S.A.' -> 'nestle s a': lowercase ASCII words, for whole-word matching."""
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", " ", ascii_name.lower()).strip()
 
 
 class TraseService:
@@ -26,6 +34,7 @@ class TraseService:
         self.preprocessed_path = preprocessed_path
         self._company_names: list[str] = []
         self._companies: dict = {}  # lowercase name -> pre-computed data
+        self._word_index: list[tuple[str, str]] = []  # (entity key, normalized name)
         self._loaded = False
         # Legacy: raw DataFrame for CSV fallback
         self._df: Optional[pd.DataFrame] = None
@@ -55,6 +64,7 @@ class TraseService:
 
             self._company_names = data.get("company_names", [])
             self._companies = data.get("companies", {})
+            self._word_index = [(key, _normalize(key)) for key in self._companies]
             self._loaded = True
 
             print(f"[Trase] Loaded preprocessed data: {len(self._company_names)} companies")
@@ -145,13 +155,17 @@ class TraseService:
         return self._search_raw(company, cutoff)
 
     def _search_preprocessed(self, company: str, cutoff: float) -> dict:
-        """Search using preprocessed JSON data (fast path)."""
-        # Fuzzy match company name
-        matches = get_close_matches(
-            company.lower(),
-            [n.lower() for n in self._company_names],
-            n=5,
-            cutoff=cutoff,
+        """Search the preprocessed data.
+
+        A company appears in Trase under many entities: one per subsidiary,
+        exporter, importer and group name (Cargill has dozens, e.g. "CARGILL
+        AGRICOLA SA" in Brazil and "CARGILL COCOA SARL" in Côte d'Ivoire). Every
+        entity whose name contains the query as whole words is matched; the
+        5-closest-names fuzzy match is only the fallback, because on its own it
+        dropped most of a group's subsidiaries.
+        """
+        matches = self._word_matches(company) or get_close_matches(
+            company.lower(), [n.lower() for n in self._company_names], n=5, cutoff=cutoff
         )
 
         if not matches:
@@ -160,11 +174,13 @@ class TraseService:
                 "company_searched": company,
                 "commodities": [],
                 "regions": [],
+                "pairs": [],
             }
 
         # Aggregate results from all matched companies
         all_commodities = set()
         all_regions = set()
+        all_pairs: dict[tuple[str, str], float] = {}
         all_volumes = {}
         all_deforestation = {}
         matched_names = []
@@ -179,6 +195,8 @@ class TraseService:
             total_records += company_data.get("total_records", 0)
             all_commodities.update(company_data.get("commodities", []))
             all_regions.update(company_data.get("regions", []))
+            for commodity, country, tonnes in company_data.get("pairs", []):
+                all_pairs[(commodity, country)] = all_pairs.get((commodity, country), 0.0) + tonnes
 
             for vc, vdata in company_data.get("volumes", {}).items():
                 if vc in all_volumes:
@@ -201,6 +219,7 @@ class TraseService:
                 "company_searched": company,
                 "commodities": [],
                 "regions": [],
+                "pairs": [],
             }
 
         # Deduplicate names
@@ -210,12 +229,23 @@ class TraseService:
             "status": "found",
             "company_searched": company,
             "matched_names": matched_names,
+            "matched_entities": len(matches),
             "total_records": total_records,
             "commodities": sorted(all_commodities),
             "regions": sorted(all_regions),
+            # Largest trade flows first: [commodity, production country, tonnes]
+            "pairs": [[c, r, round(t, 2)] for (c, r), t in sorted(all_pairs.items(), key=lambda kv: (-kv[1], kv[0]))],
             "volumes": all_volumes,
             "deforestation_indicators": all_deforestation,
         }
+
+    def _word_matches(self, company: str) -> list[str]:
+        """Entity keys whose normalized name contains the normalized query as whole words."""
+        query = _normalize(company)
+        if len(query) < 3:
+            return []
+        pattern = re.compile(rf"\b{re.escape(query)}\b")
+        return [key for key, norm in self._word_index if pattern.search(norm)]
 
     def _search_raw(self, company: str, cutoff: float) -> dict:
         """Legacy: search using raw DataFrame."""

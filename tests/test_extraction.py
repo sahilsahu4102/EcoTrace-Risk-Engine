@@ -116,3 +116,41 @@ def test_llm_timeout_falls_back_to_keywords(llm):
 
     assert _names(res.commodities) == ["Cocoa"]
     assert llm.await_count == 1  # no retry
+
+
+def test_unavailable_models_are_skipped_until_one_answers(monkeypatch):
+    """A 402 (no credits) or 404 (model withdrawn) moves on to the next free model."""
+    monkeypatch.setattr(extraction, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(extraction, "OPENROUTER_MODEL", "paid/model")
+    monkeypatch.setattr(extraction, "FREE_MODELS", ["gone/model:free", "working/model:free"])
+    answers = {
+        "paid/model": httpx.Response(402, text="Insufficient credits"),
+        "gone/model:free": httpx.Response(404, text="unavailable"),
+        "working/model:free": httpx.Response(200, json={"choices": [{"message": {"content":
+            '{"commodities": ["Cocoa"], "sourcing_countries": ["Ghana"], "operational_countries": []}'}}]}),
+    }
+    tried = []
+
+    async def post(self, url, json=None, **kwargs):
+        tried.append(json["model"])
+        return answers[json["model"]]
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    res = asyncio.run(extraction.extract_entities("We source cocoa from Ghana. " * 5))
+
+    assert tried == ["paid/model", "gone/model:free", "working/model:free"]
+    assert [c["name"] for c in res.commodities] == ["Cocoa"]
+    assert [r["name"] for r in res.regions] == ["Ghana"]
+
+
+def test_json_wrapped_in_prose_is_still_parsed(monkeypatch):
+    monkeypatch.setattr(extraction, "OPENROUTER_API_KEY", "test-key")
+    reply = 'Sure! Here it is: {"commodities": ["Soy"], "sourcing_countries": ["Brazil"], "operational_countries": []} Done.'
+
+    async def post(self, url, json=None, **kwargs):
+        return httpx.Response(200, json={"choices": [{"message": {"content": reply}}]})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    res = asyncio.run(extraction.extract_entities("We buy soy from Brazil. " * 5))
+    assert [c["name"] for c in res.commodities] == ["Soy"]
+    assert [r["sourcing_confidence"] for r in res.regions] == ["estimated"]

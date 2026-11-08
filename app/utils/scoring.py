@@ -17,6 +17,7 @@ def compute_risk_score(
     regions: list[dict],
     gfw_overrides: dict[str, float] | None = None,
     forest500_score: float | None = None,
+    pairs: list[tuple[str, str, str]] | None = None,
 ) -> tuple[float, list[dict]]:
     """
     Compute overall deforestation risk score (0-100).
@@ -32,10 +33,28 @@ def compute_risk_score(
         regions: List of detected regions with base_risk
         gfw_overrides: Optional dict of {iso_code: normalized_risk} from GFW live data
         forest500_score: Optional policy score from Forest 500 (0-100)
+        pairs: Optional (commodity, region name, evidence) pairs to score instead of
+            every commodity x every region. Company analyses pass them: until 2026-11
+            the full cross-product scored pairs such as "Palm Oil x Chile", which no
+            trade record or producer list supports. With no usable pair the score
+            falls back to the commodity-only estimate below.
 
     Returns:
         Tuple of (risk_score, breakdown_list)
     """
+    if pairs is not None:
+        by_commodity = {c["name"]: c for c in commodities}
+        by_region = {r["name"]: r for r in regions}
+        selected = [
+            (by_commodity[c], by_region[r], evidence)
+            for c, r, evidence in pairs
+            if c in by_commodity and r in by_region
+        ]
+        if not selected:
+            return compute_risk_score(commodities, [] if commodities else regions,
+                                      gfw_overrides, forest500_score)
+        return _score_pairs(selected, gfw_overrides, forest500_score)
+
     if not commodities and not regions:
         return 0.0, []
 
@@ -53,43 +72,45 @@ def compute_risk_score(
         score = _apply_forest500_adjustment(score, forest500_score)
         return round(min(max(score, 0), 100), 1), []
 
-    # Cross-product scoring
+    # Cross-product scoring (commodity-category queries, whose regions are the
+    # commodity's own producer countries, so every pair is plausible)
+    return _score_pairs(
+        [(c, r, None) for c in commodities for r in regions], gfw_overrides, forest500_score
+    )
+
+
+def _score_pairs(
+    pairs: list[tuple[dict, dict, str | None]],
+    gfw_overrides: dict[str, float] | None,
+    forest500_score: float | None,
+) -> tuple[float, list[dict]]:
+    """Average commodity_weight x region_risk x 100 over the given pairs."""
     breakdown = []
     total_score = 0.0
-    pair_count = 0
 
-    for commodity in commodities:
-        c_name = commodity["name"]
-        c_weight = commodity["risk_weight"]
+    for commodity, region, evidence in pairs:
+        r_iso = region["iso_code"]
+        # Use GFW live data if available, otherwise use base_risk
+        if gfw_overrides and r_iso in gfw_overrides:
+            r_risk = gfw_overrides[r_iso]
+        else:
+            r_risk = region["base_risk"]
 
-        for region in regions:
-            r_name = region["name"]
-            r_iso = region["iso_code"]
+        combined = commodity["risk_weight"] * r_risk * 100
+        row = {
+            "commodity": commodity["name"],
+            "region": region["name"],
+            "region_iso": r_iso,
+            "commodity_weight": commodity["risk_weight"],
+            "region_risk": r_risk,
+            "combined_score": round(combined, 1),
+        }
+        if evidence:
+            row["evidence"] = evidence
+        breakdown.append(row)
+        total_score += combined
 
-            # Use GFW live data if available, otherwise use base_risk
-            if gfw_overrides and r_iso in gfw_overrides:
-                r_risk = gfw_overrides[r_iso]
-            else:
-                r_risk = region["base_risk"]
-
-            combined = c_weight * r_risk * 100
-            breakdown.append({
-                "commodity": c_name,
-                "region": r_name,
-                "region_iso": r_iso,
-                "commodity_weight": c_weight,
-                "region_risk": r_risk,
-                "combined_score": round(combined, 1),
-            })
-
-            total_score += combined
-            pair_count += 1
-
-    # Weighted average
-    if pair_count > 0:
-        score = total_score / pair_count
-    else:
-        score = 0.0
+    score = total_score / len(pairs) if pairs else 0.0
 
     # Apply Forest 500 policy adjustment
     score = _apply_forest500_adjustment(score, forest500_score)

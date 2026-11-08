@@ -6,6 +6,7 @@ runs extraction and scoring, and returns a comprehensive risk assessment.
 """
 
 import asyncio
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
@@ -53,135 +54,39 @@ def load_data_services():
     forest500_service.load()
 
 
-from app.services.cache_db import get_cached_risk, save_cached_risk
+from app.services.cache_db import get_cached_entry, save_cached_risk
+
+# Background refreshes in flight (lowercased query), and their tasks so they are not garbage-collected
+_refreshing: set[str] = set()
+_background_tasks: set[asyncio.Task] = set()
+
 
 @router.post("/risk", response_model=RiskResponse)
 async def analyze_risk(request: RiskRequest):
     """
-    Analyze deforestation risk for a company.
+    Analyze deforestation risk for a company or a commodity category.
 
-    Orchestrates 4 data sources concurrently:
-    1. CSR page scraping (Scrapingdog / direct HTTP)
-    2. Trase supply chain data (CSV)
-    3. Forest 500 policy rankings (CSV)
-    4. Global Forest Watch tree cover loss (API)
+    Company analyses query 4 data sources concurrently:
+    1. CSR page (direct HTTP, then the Jina Reader for bot-protected sites)
+    2. Trase supply chain trade records (preprocessed JSON)
+    3. Forest 500 policy rankings (preprocessed JSON)
+    4. Global Forest Watch tree cover loss and deforestation alerts (live API)
 
-    Returns a comprehensive risk assessment with score, confidence,
-    commodity/region breakdown, and disclosure flags.
+    A cached result is returned at once; if it is older than a day it is also
+    recomputed in the background, so the next visitor gets fresh data without
+    anyone waiting for the live sources.
     """
     company = request.company.strip()
 
-    # --- CACHE CHECK ---
-    cached_data = get_cached_risk(company)
-    if cached_data:
-        return RiskResponse(**cached_data)
-    # -------------------
+    cached = get_cached_entry(company)
+    if cached:
+        data, fresh = cached
+        if not fresh:
+            _refresh_in_background(company)
+        return RiskResponse(**data)
 
-    # Check if query is a commodity → return category-level risk
-    if is_commodity_query(company):
-        resp = await _analyze_commodity_category(company)
-        save_cached_risk(
-            company, resp.risk_score, resp.risk_level, 
-            resp.confidence_score, resp.confidence_level, resp.model_dump()
-        )
-        return resp
-
-    # Run all data sources concurrently
-    csr_task = asyncio.create_task(_get_csr_data(company))
-    trase_task = asyncio.create_task(_get_trase_data(company))
-    forest500_task = asyncio.create_task(_get_forest500_data(company))
-
-    csr_result, trase_result, forest500_result = await asyncio.gather(
-        csr_task, trase_task, forest500_task,
-        return_exceptions=True,
-    )
-
-    # Handle exceptions from gather
-    if isinstance(csr_result, Exception):
-        csr_result = _error_source("csr", str(csr_result))
-    if isinstance(trase_result, Exception):
-        trase_result = _error_source("trase", str(trase_result))
-    if isinstance(forest500_result, Exception):
-        forest500_result = _error_source("forest500", str(forest500_result))
-
-    # Build extraction from REAL structured data (not text blobs)
-    extraction = _merge_structured_extraction(csr_result, trase_result, forest500_result)
-
-    # Get GFW data for detected regions
-    gfw_overrides, gfw_result = await _gfw_source([r["iso_code"] for r in extraction.regions])
-
-    # Get Forest 500 policy score for scoring adjustment
-    forest500_score = None
-    if isinstance(forest500_result, dict) and forest500_result.get("status") == "success":
-        raw = forest500_result.get("raw_data", {})
-        forest500_score = raw.get("policy_score")
-
-    # Compute risk score
-    risk_score, breakdown = compute_risk_score(
-        extraction.commodities,
-        extraction.regions,
-        gfw_overrides=gfw_overrides if gfw_overrides else None,
-        forest500_score=forest500_score,
-    )
-    risk_level = get_risk_level(risk_score)
-
-    # Compute confidence score
-    sources_responded = sum(1 for s in [csr_result, trase_result, forest500_result, gfw_result]
-                           if isinstance(s, dict) and s.get("status") == "success")
-    confidence_score = compute_confidence_score(
-        num_sources_responded=sources_responded,
-        has_commodities=bool(extraction.commodities),
-        has_regions=bool(extraction.regions),
-        has_csr=isinstance(csr_result, dict) and csr_result.get("status") == "success",
-        has_forest500=isinstance(forest500_result, dict) and forest500_result.get("status") == "success",
-        has_gfw=isinstance(gfw_result, dict) and gfw_result.get("status") == "success",
-        has_trase=isinstance(trase_result, dict) and trase_result.get("status") == "success",
-    )
-    confidence_level = get_confidence_level(confidence_score)
-
-    # Build disclosure flags
-    flags = DisclosureFlags(
-        no_csr_page_found=not (isinstance(csr_result, dict) and csr_result.get("status") == "success"),
-        no_trase_data=not (isinstance(trase_result, dict) and trase_result.get("status") == "success"),
-        no_forest500_data=not (isinstance(forest500_result, dict) and forest500_result.get("status") == "success"),
-        no_gfw_data=not (isinstance(gfw_result, dict) and gfw_result.get("status") == "success"),
-        low_confidence=confidence_score < 30,
-        no_commodities_detected=not extraction.commodities,
-        no_regions_detected=not extraction.regions,
-    )
-
-    # Generate summary
-    summary = generate_summary(
-        company, risk_score, risk_level, confidence_level,
-        extraction.commodities, extraction.regions,
-    )
-
-    # Build response
-    resp = RiskResponse(
-        company=company,
-        risk_score=risk_score,
-        risk_level=risk_level,
-        confidence_score=confidence_score,
-        confidence_level=confidence_level,
-        commodities=[CommodityDetail(**c) for c in extraction.commodities],
-        regions=[RegionDetail(**r) for r in extraction.regions],
-        operational_regions=[RegionDetail(**r) for r in getattr(extraction, 'operational_regions', [])],
-        breakdown=[CommodityRegionBreakdown(**b) for b in breakdown],
-        sources=[
-            _to_source_result(csr_result),
-            _to_source_result(trase_result),
-            _to_source_result(forest500_result),
-            _to_source_result(gfw_result),
-        ],
-        flags=flags,
-        summary=summary,
-    )
-
-    save_cached_risk(
-        company, resp.risk_score, resp.risk_level, 
-        resp.confidence_score, resp.confidence_level, resp.model_dump()
-    )
-
+    resp = await _compute(company)
+    _save(company, resp)
     return resp
 
 
@@ -189,6 +94,40 @@ async def analyze_risk(request: RiskRequest):
 async def analyze_risk_get(company: str):
     """Convenience GET endpoint for risk analysis."""
     return await analyze_risk(RiskRequest(company=company))
+
+
+async def _compute(query: str) -> RiskResponse:
+    if is_commodity_query(query):
+        return await _analyze_commodity_category(query)
+    return await _analyze_company_direct(query)
+
+
+def _save(query: str, resp: RiskResponse) -> None:
+    save_cached_risk(query, resp.risk_score, resp.risk_level,
+                     resp.confidence_score, resp.confidence_level, resp.model_dump())
+
+
+def _refresh_in_background(query: str) -> None:
+    key = query.lower()
+    if key in _refreshing:
+        return
+    _refreshing.add(key)
+
+    async def run():
+        try:
+            _save(query, await _compute(query))
+        except Exception as e:  # a failed refresh keeps the old result
+            print(f"[cache] background refresh failed for {query}: {e}")
+        finally:
+            _refreshing.discard(key)
+
+    task = asyncio.create_task(run())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 async def _analyze_commodity_category(query: str) -> RiskResponse:
@@ -279,6 +218,7 @@ async def _analyze_commodity_category(query: str) -> RiskResponse:
 
     return RiskResponse(
         company=f"CATEGORY: {commodity_name}",
+        computed_at=_now(),
         risk_score=risk_score,
         risk_level=risk_level,
         confidence_score=confidence_score,
@@ -333,8 +273,11 @@ async def _analyze_company_direct(company: str, skip_csr: bool = False) -> RiskR
         forest500_result = _error_source("forest500", str(forest500_result))
 
     extraction = _merge_structured_extraction(csr_result, trase_result, forest500_result)
+    pairs, paired_regions = _scoring_pairs(extraction, trase_result)
+    # Show the countries that are scored; with no supported pair, show what was found
+    regions = paired_regions if pairs else extraction.regions
 
-    gfw_overrides, gfw_result = await _gfw_source([r["iso_code"] for r in extraction.regions])
+    gfw_overrides, gfw_result = await _gfw_source([r["iso_code"] for r in regions])
 
     forest500_score = None
     if isinstance(forest500_result, dict) and forest500_result.get("status") == "success":
@@ -346,6 +289,7 @@ async def _analyze_company_direct(company: str, skip_csr: bool = False) -> RiskR
         extraction.regions,
         gfw_overrides=gfw_overrides if gfw_overrides else None,
         forest500_score=forest500_score,
+        pairs=pairs,
     )
     risk_level = get_risk_level(risk_score)
 
@@ -369,20 +313,21 @@ async def _analyze_company_direct(company: str, skip_csr: bool = False) -> RiskR
         no_gfw_data=not (isinstance(gfw_result, dict) and gfw_result.get("status") == "success"),
         low_confidence=confidence_score < 30,
         no_commodities_detected=not extraction.commodities,
-        no_regions_detected=not extraction.regions,
+        no_regions_detected=not regions,
     )
 
     summary = generate_summary(company, risk_score, risk_level, confidence_level,
-                           extraction.commodities, extraction.regions)
+                           extraction.commodities, regions)
 
     return RiskResponse(
         company=company,
+        computed_at=_now(),
         risk_score=risk_score,
         risk_level=risk_level,
         confidence_score=confidence_score,
         confidence_level=confidence_level,
         commodities=[CommodityDetail(**c) for c in extraction.commodities],
-        regions=[RegionDetail(**r) for r in extraction.regions],
+        regions=[RegionDetail(**r) for r in regions],
         operational_regions=[RegionDetail(**r) for r in extraction.operational_regions] if hasattr(extraction, 'operational_regions') else [],
         breakdown=[CommodityRegionBreakdown(**b) for b in breakdown],
         sources=[
@@ -441,13 +386,19 @@ async def _get_trase_data(company: str) -> dict:
     try:
         result = trase_service.search(company)
         if result["status"] == "found":
+            pairs = result.get("pairs", [])
             return {
                 "source_name": "trase",
                 "status": "success",
                 "commodities_found": result.get("commodities", []),
                 "regions_found": result.get("regions", []),
+                "pairs": pairs,
                 "raw_data": {
-                    "matched_names": result.get("matched_names", []),
+                    "matched_names": result.get("matched_names", [])[:25],
+                    "matched_entities": result.get("matched_entities", 0),
+                    "trade_flows": [
+                        {"commodity": c, "country": r.title(), "tonnes": t} for c, r, t in pairs[:10]
+                    ],
                     "total_records": result.get("total_records", 0),
                     "volumes": result.get("volumes", {}),
                     "deforestation_indicators": result.get("deforestation_indicators", {}),
@@ -605,6 +556,39 @@ def _merge_structured_extraction(csr: dict, trase: dict, forest500: dict):
     )
 
 
+def _scoring_pairs(extraction, trase: dict) -> tuple[list[tuple[str, str, str]], list[dict]]:
+    """Commodity-country pairs the evidence supports, and the regions they use.
+
+    A pair is scored when Trase records that commodity leaving that country for
+    this company, or when the country is a known producer of the commodity (its
+    REGIONS entry links them). Every other combination of the commodities and
+    countries found, such as "Palm Oil x Chile", is left out: until 2026-11 all of
+    them were scored.
+    """
+    from app.services.extraction import _REGION_LOOKUP
+
+    commodities = {c["name"] for c in extraction.commodities}
+    regions = {r["name"]: r for r in extraction.regions}
+    pairs: dict[tuple[str, str], str] = {}
+
+    if isinstance(trase, dict) and trase.get("status") == "success":
+        for commodity, country, _tonnes in trase.get("pairs", []):
+            region = _REGION_LOOKUP.get(str(country).lower())
+            if region and commodity in commodities and region.name in regions:
+                pairs[(commodity, region.name)] = "Trase trade records"
+
+    for name, region in regions.items():
+        for commodity in commodities:
+            if commodity in region.get("linked_commodities", []):
+                pairs.setdefault((commodity, name), f"{name} is a major {commodity} producer")
+
+    used = {region for _, region in pairs}
+    return (
+        [(c, r, evidence) for (c, r), evidence in sorted(pairs.items())],
+        [region for name, region in regions.items() if name in used],
+    )
+
+
 async def _gfw_source(iso_codes: list[str]) -> tuple[dict[str, float], dict]:
     """GFW risk per country, plus a source result that says how much of it was live.
 
@@ -622,6 +606,13 @@ async def _gfw_source(iso_codes: list[str]) -> tuple[dict[str, float], dict]:
 
     overrides = {iso: data.get("normalized_risk", 0.5) for iso, data in countries.items()}
     live = [iso for iso, data in countries.items() if data.get("status") == "live_api"]
+    live_detail = {
+        iso: {k: countries[iso].get(k) for k in (
+            "trend_ratio", "recent_years", "recent_avg_loss_ha", "baseline_avg_loss_ha",
+            "alerts_90d_ha", "latest_alert",
+        )}
+        for iso in live
+    }
     if len(live) == len(countries):
         status = "success"
     elif live:
@@ -633,7 +624,7 @@ async def _gfw_source(iso_codes: list[str]) -> tuple[dict[str, float], dict]:
         "status": status,
         "commodities_found": [],
         "regions_found": list(overrides),
-        "raw_data": {"risk_by_country": overrides, "live_countries": live},
+        "raw_data": {"risk_by_country": overrides, "live_countries": live, "live": live_detail},
     }
 
 

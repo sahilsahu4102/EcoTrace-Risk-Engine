@@ -163,7 +163,7 @@ export default function ResultsPage() {
   }, [company]);
 
   if (loading) return <LoadingSkeleton company={company} />;
-  if (error) return <ErrorScreen error={error} onBack={() => router.push("/")} />;
+  if (error) return <ErrorScreen error={error} onBack={() => router.push("/")} onRetry={() => window.location.reload()} />;
   if (!data) return null;
 
   const breakdownChartData = data.breakdown.slice(0, 8).map((b) => ({
@@ -207,6 +207,7 @@ export default function ResultsPage() {
           <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>{data.company}</h1>
           <p style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
             Deforestation Risk Assessment
+            {data.computed_at && ` · data as of ${new Date(data.computed_at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`}
           </p>
         </div>
 
@@ -370,6 +371,7 @@ export default function ResultsPage() {
                 <th>Region Risk</th>
                 <th>Combined</th>
                 <th style={{ width: 120 }}>Score</th>
+                <th>Evidence</th>
               </tr>
             </thead>
             <tbody>
@@ -401,6 +403,9 @@ export default function ResultsPage() {
                         }}
                       />
                     </div>
+                  </td>
+                  <td style={{ fontSize: "0.75rem", color: b.evidence === "Trase trade records" ? "var(--accent-emerald)" : "var(--text-muted)" }}>
+                    {b.evidence === "Trase trade records" ? "Trade records" : b.evidence ? "Producer country" : "—"}
                   </td>
                 </tr>
               ))}
@@ -523,6 +528,17 @@ export default function ResultsPage() {
                   </div>
                 )}
                 
+                {s.source_name === "gfw" && !!s.raw_data?.live && Object.keys(s.raw_data.live as object).length > 0 && (
+                  <div style={{ marginTop: 6, fontSize: "0.7rem", color: "var(--text-secondary)" }}>
+                    Live for {Object.keys(s.raw_data.live as object).length} countries
+                    {(() => {
+                      const dates = Object.values(s.raw_data.live as Record<string, { latest_alert?: string | null }>)
+                        .map((v) => v.latest_alert).filter(Boolean).sort();
+                      return dates.length ? ` · latest alert ${dates[dates.length - 1]}` : "";
+                    })()}
+                  </div>
+                )}
+
                 {s.status === "success" && s.source_name === "csr" && typeof s.raw_data?.url === "string" && (
                   <a href={s.raw_data.url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 8, fontSize: "0.7rem", color: "var(--accent-blue)", textDecoration: "none" }}>
                     View scraped webpage ↗
@@ -566,11 +582,23 @@ function FlagItem({ label, warn = false }: { label: string; warn?: boolean }) {
 }
 
 function LoadingSkeleton({ company }: { company: string }) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const step =
+    seconds < 5 ? "Matching trade records (Trase) and policy scores (Forest 500)..."
+    : seconds < 25 ? "Reading the company's sustainability page and live Global Forest Watch data..."
+    : "Still working: the free server may have been asleep, which adds up to a minute. Results are cached afterwards.";
   return (
     <main style={{ minHeight: "100vh", padding: "24px 20px", maxWidth: 1200, margin: "0 auto" }}>
       <div style={{ marginBottom: 32 }}>
         <h1 style={{ fontSize: "1.5rem", fontWeight: 700 }}>{company}</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>Analyzing deforestation risk...</p>
+        <p style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>
+          Analyzing deforestation risk · {seconds}s
+        </p>
+        <p style={{ color: "var(--text-secondary)", fontSize: "0.8125rem", marginTop: 6 }}>{step}</p>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
         {[1, 2, 3, 4].map((i) => (
@@ -589,13 +617,32 @@ function LoadingSkeleton({ company }: { company: string }) {
   );
 }
 
-function ErrorScreen({ error, onBack }: { error: string; onBack: () => void }) {
+function ErrorScreen({ error, onBack, onRetry }: { error: string; onBack: () => void; onRetry: () => void }) {
   return (
     <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div className="glass-card" style={{ padding: 40, textAlign: "center", maxWidth: 440 }}>
         <AlertTriangle size={40} color="#ef4444" style={{ marginBottom: 16 }} />
         <h2 style={{ fontSize: "1.25rem", fontWeight: 700, marginBottom: 8 }}>Analysis Failed</h2>
-        <p style={{ color: "var(--text-muted)", fontSize: "0.875rem", marginBottom: 24 }}>{error}</p>
+        <p style={{ color: "var(--text-muted)", fontSize: "0.875rem", marginBottom: 24 }}>
+          {error === "Failed to fetch"
+            ? "The analysis server did not answer. It runs on a free host that sleeps when idle; trying again usually works."
+            : error}
+        </p>
+        <button
+          onClick={onRetry}
+          style={{
+            background: "transparent",
+            color: "var(--text-primary)",
+            border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 12,
+            padding: "12px 24px",
+            fontWeight: 600,
+            cursor: "pointer",
+            marginRight: 12,
+          }}
+        >
+          Try again
+        </button>
         <button
           onClick={onBack}
           style={{

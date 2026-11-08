@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Search, TreePine, AlertTriangle, Globe, Clock } from "lucide-react";
+import { healthCheck } from "@/lib/api";
 
 const SUGGESTIONS = [
   { label: "Unilever", icon: "🧴" },
@@ -21,6 +22,12 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const router = useRouter();
+
+  // Wake the backend while the visitor reads the page: the free host sleeps after
+  // 15 idle minutes and takes up to a minute to start.
+  useEffect(() => {
+    healthCheck().catch(() => {});
+  }, []);
 
   // Load recent searches from localStorage on mount
   useEffect(() => {

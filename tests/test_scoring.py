@@ -108,3 +108,20 @@ def test_compute_confidence_score_partial():
 )
 def test_get_confidence_level(score, level):
     assert get_confidence_level(score) == level
+
+
+def test_explicit_pairs_score_only_those_combinations():
+    commodities = [_commodity("Soy", 0.9), _commodity("Palm Oil", 0.95)]
+    regions = [_region("Brazil", "BRA", 0.8), _region("Indonesia", "IDN", 0.6)]
+    pairs = [("Soy", "Brazil", "Trase trade records"), ("Palm Oil", "Indonesia", "producer")]
+
+    score, breakdown = compute_risk_score(commodities, regions, pairs=pairs)
+
+    assert score == round((0.9 * 0.8 + 0.95 * 0.6) / 2 * 100, 1)
+    assert [(b["commodity"], b["region"], b["evidence"]) for b in breakdown] == [
+        ("Soy", "Brazil", "Trase trade records"), ("Palm Oil", "Indonesia", "producer")]
+
+
+def test_no_supported_pair_falls_back_to_the_commodity_only_estimate():
+    commodities, regions = [_commodity("Soy", 0.9)], [_region("Chile", "CHL", 0.4)]
+    assert compute_risk_score(commodities, regions, pairs=[]) == (45.0, [])  # 0.9 * 50

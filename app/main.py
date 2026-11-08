@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Deforestation Risk Scorer",
     description="Aggregates real public data from Trase, Forest 500, GFW, and CSR pages to compute deforestation risk scores for supply chains.",
-    version="0.3.0 — Phase 3",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -96,7 +96,7 @@ async def health_check():
 
     return {
         "status": "healthy",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "phase": 3,
         "services": {
             "extraction_engine": "ready",
@@ -104,7 +104,7 @@ async def health_check():
             "trase": "loaded" if trase_service.is_loaded else "no_data",
             "forest500": "loaded" if forest500_service.is_loaded else "no_data",
             "gfw": "api_key_set" if gfw_service.has_api_key else "fallback_mode",
-            "csr_scraper": "api_key_set" if scraper.has_api_key else "direct_mode",
+            "csr_scraper": "direct + jina_reader",
         },
     }
 

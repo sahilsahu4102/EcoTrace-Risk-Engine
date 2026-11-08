@@ -37,6 +37,10 @@ class CommodityRegionBreakdown(BaseModel):
     commodity_weight: float
     region_risk: float
     combined_score: float = Field(..., description="commodity_weight × region_risk × 100")
+    evidence: Optional[str] = Field(
+        default=None,
+        description="Why this pair is scored: a Trase trade flow, or the country being a known producer of the commodity",
+    )
 
 
 class SourceResult(BaseModel):
@@ -77,7 +81,10 @@ class RiskResponse(BaseModel):
     flags: DisclosureFlags = Field(default_factory=DisclosureFlags, description="Disclosure quality flags")
 
     summary: str = Field(default="", description="Human-readable risk summary")
+    computed_at: Optional[str] = Field(
+        default=None, description="UTC time the live sources were queried for this result (cached results keep it)"
+    )
     methodology_note: str = Field(
-        default="Risk assessment based on multi-source analysis: Trase supply chain trade records, CSR page AI extraction, Forest 500 policy scores, and Global Forest Watch deforestation data. Sourcing countries are classified as estimated (trade records or CSR disclosure) or inferred (global commodity-risk models). All sourcing attribution is probabilistic.",
+        default="Risk is the average of commodity weight x country risk over the commodity-country pairs the evidence supports: a Trase trade record of that commodity leaving that country, or the country being a known producer of it. Country risk is an expert tier, moved by up to 0.1 by Global Forest Watch's recent tree-cover-loss trend; GFW deforestation alerts in natural forest are shown for context. Forest 500 policy scores adjust the total, and the company's sustainability page is read with an AI model. All sourcing attribution is probabilistic.",
         description="Transparent methodology explanation"
     )

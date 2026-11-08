@@ -1,4 +1,5 @@
 import asyncio
+import re
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -60,7 +61,10 @@ def test_csr_timeout_leaves_other_sources_intact(sources):
     assert next(s for s in resp.sources if s.source_name == "csr").error == "csr timed out"
     assert sorted(c.name for c in resp.commodities) == ["Palm Oil", "Soy"]
     assert [r.name for r in resp.regions] == ["Brazil"]
-    assert resp.risk_score == 74.0  # (0.90 * 0.8 + 0.95 * 0.8) / 2 * 100, policy score 70 = no adjustment
+    # Only Soy x Brazil is scored: Brazil is not a palm-oil producer, so Palm Oil x Brazil
+    # (scored until 2026-11, giving 74.0) has no support. 0.90 * 0.8 * 100, policy 70 = no adjustment
+    assert resp.risk_score == 72.0
+    assert [(b.commodity, b.region) for b in resp.breakdown] == [("Soy", "Brazil")]
     assert resp.flags.no_csr_page_found and not resp.flags.no_trase_data
     sources.gfw.assert_awaited_once_with(["BRA"])
 
@@ -159,3 +163,61 @@ def test_rate_limiter_returns_429_after_20_posts_per_minute():
 
     assert codes[:20] == [405] * 20
     assert codes[20] == 429
+
+
+def test_trase_pairs_are_scored_and_unsupported_combinations_dropped(sources):
+    """Forest 500 adds Cocoa; Argentina produces no cocoa, so Cocoa x Argentina is not scored."""
+    sources.trase.return_value = {
+        "status": "found", "commodities": ["Soy"], "regions": ["ARGENTINA"], "matched_names": ["ACME SA"],
+        "pairs": [["Soy", "ARGENTINA", 1000.0]], "total_records": 1, "volumes": {}, "deforestation_indicators": {},
+    }
+    sources.forest500.return_value = {"status": "found", "commodities": ["Cocoa"], "policy_score": 70.0,
+                                      "matched_names": ["Acme"], "category_scores": {}, "metadata": {}}
+
+    resp = _analyze()
+
+    assert [(b.commodity, b.region, b.evidence) for b in resp.breakdown] == [("Soy", "Argentina", "Trase trade records")]
+    assert sorted(c.name for c in resp.commodities) == ["Cocoa", "Soy"]
+    trase = next(s for s in resp.sources if s.source_name == "trase")
+    assert trase.raw_data["trade_flows"] == [{"commodity": "Soy", "country": "Argentina", "tonnes": 1000.0}]
+
+
+def test_country_with_no_supported_commodity_is_not_shown_or_scored(sources):
+    ghana, chile = (next(r for r in REGIONS if r.name == n) for n in ("Ghana", "Chile"))
+    sources.scrape.return_value = {"status": "success", "url": "https://www.acme.com/sustainability",
+                                   "text": "We buy cocoa.", "text_length": 13}
+    sources.extract.return_value = ExtractionResult(
+        commodities=[{"name": "Cocoa", "risk_weight": 0.8, "matched_keywords": ["cocoa"]}],
+        regions=[_region_to_dict(r, "estimated", "test") for r in (ghana, chile)],
+        operational_regions=[],
+    )
+
+    resp = _analyze()
+
+    assert [r.name for r in resp.regions] == ["Ghana"]
+    assert [(b.commodity, b.region) for b in resp.breakdown] == [("Cocoa", "Ghana")]
+    sources.gfw.assert_awaited_once_with(["GHA"])
+
+
+def test_stale_result_is_served_at_once_and_refreshed_in_background(sources, cache_db_path, monkeypatch):
+    import sqlite3
+
+    sources.trase.return_value = TRASE_SOY_BRAZIL
+    first = _analyze("Acme")
+    with sqlite3.connect(cache_db_path) as conn:
+        conn.execute("UPDATE risk_cache SET created_at = datetime('now', '-3 days')")
+    refresh = Mock()
+    monkeypatch.setattr(risk, "_refresh_in_background", refresh)
+    for mock in vars(sources).values():
+        mock.reset_mock()
+
+    second = _analyze("Acme")
+
+    assert second.model_dump() == first.model_dump()
+    sources.trase.assert_not_called()  # answered from the stale row, no live call on the request path
+    refresh.assert_called_once_with("Acme")
+
+
+def test_results_carry_the_time_they_were_computed(sources):
+    sources.trase.return_value = TRASE_SOY_BRAZIL
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", _analyze().computed_at)

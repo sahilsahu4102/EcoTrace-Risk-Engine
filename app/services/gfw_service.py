@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import time
+from datetime import date, timedelta
 from typing import Optional
 
 import httpx
@@ -28,9 +29,12 @@ class GFWService:
     # GFW Data API base URL
     BASE_URL = "https://data-api.globalforestwatch.org"
 
-    # Dataset for tree cover loss by country
-    DATASET = "umd_tree_cover_loss"
-    VERSION = "v1.11"
+    # GFW's per-country summary tables (see _query_api)
+    DATASET = "gadm__tcl__iso_change"
+    ALERTS_DATASET = "gadm__integrated_alerts__iso_daily_alerts"
+    VERSION = "latest"
+    ALERT_WINDOW_DAYS = 90
+    MAX_TREND_ADJUSTMENT = 0.1
 
     # Cache TTL in seconds (1 hour)
     CACHE_TTL = 3600
@@ -87,85 +91,110 @@ class GFWService:
         return fallback
 
     async def _query_api(self, iso_code: str) -> Optional[dict]:
-        """Query the GFW Data API for tree cover loss."""
+        """Yearly tree cover loss and recent deforestation alerts for one country.
+
+        Until 2026-11 this queried the raster dataset `umd_tree_cover_loss`, which
+        refuses country queries without a geometry (HTTP 422), so every request fell
+        back to static data. The `gadm__*__iso_*` tables are GFW's own per-country
+        summaries of the same UMD data and of the integrated (GLAD-L, GLAD-S2, RADD)
+        alerts. Their `latest` version redirects to the current one.
+        """
         if not self.api_key:
             print(f"[GFW] No API key configured, using fallback for {iso_code}")
             return None
+        if not (len(iso_code) == 3 and iso_code.isalpha()):  # it is put into SQL below
+            return None
 
-        url = f"{self.BASE_URL}/dataset/{self.DATASET}/{self.VERSION}/query"
-
-        # SQL query for tree cover loss by year for a country
-        sql = (
-            f"SELECT umd_tree_cover_loss__year, SUM(umd_tree_cover_loss__ha) as total_loss_ha "
-            f"FROM results "
-            f"WHERE iso = '{iso_code}' "
-            f"GROUP BY umd_tree_cover_loss__year "
-            f"ORDER BY umd_tree_cover_loss__year"
+        loss_sql = (
+            "SELECT umd_tree_cover_loss__year, SUM(umd_tree_cover_loss__ha) AS total_loss_ha FROM data "
+            f"WHERE iso = '{iso_code}' AND umd_tree_cover_density_2000__threshold = 30 "
+            "GROUP BY umd_tree_cover_loss__year ORDER BY umd_tree_cover_loss__year"
         )
+        since = (date.today() - timedelta(days=self.ALERT_WINDOW_DAYS)).isoformat()
+        # Natural forest only, as GFW's dashboards report it: most alert area in the
+        # table is on unclassified land (4.3 M of India's 4.4 M ha over 90 days), which
+        # would present crop and land-cover changes as deforestation.
+        alerts_sql = (
+            "SELECT SUM(alert_area__ha) AS area_ha, MAX(gfw_integrated_alerts__date) AS latest FROM data "
+            f"WHERE iso = '{iso_code}' AND gfw_integrated_alerts__date >= '{since}' "
+            "AND gfw_integrated_alerts__confidence IN ('high', 'highest') "
+            "AND sbtn_natural_forests__class = 'Natural Forest'"
+        )
+        headers = {"x-api-key": self.api_key}
 
-        headers = {
-            "x-api-key": self.api_key,
-            "Content-Type": "application/json",
-        }
+        def query(dataset: str, sql: str):
+            url = f"{self.BASE_URL}/dataset/{dataset}/{self.VERSION}/query/json"
+            return with_retry(lambda: client.get(url, params={"sql": sql}, headers=headers))
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await with_retry(
-                    lambda: client.get(url, params={"sql": sql}, headers=headers)
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                loss, alerts = await asyncio.gather(
+                    query(self.DATASET, loss_sql), query(self.ALERTS_DATASET, alerts_sql),
+                    return_exceptions=True,
                 )
-
-                if response.status_code == 200:
-                    data = response.json()
-                    return self._parse_api_response(iso_code, data)
-                elif response.status_code == 422 and "require a geometry" in response.text:
-                    # GFW API dataset structural change (raster query). Suppress error and use fallback.
-                    return None
-                else:
-                    print(f"[GFW] API error {response.status_code} for {iso_code}: {response.text[:200]}")
-                    return None
-
-        except httpx.TimeoutException:
-            print(f"[GFW] API timeout for {iso_code}")
-            return None
         except Exception as e:
             print(f"[GFW] API error for {iso_code}: {e}")
             return None
 
-    def _parse_api_response(self, iso_code: str, data: dict) -> dict:
-        """Parse GFW API response into a normalized result."""
-        rows = data.get("data", [])
+        if isinstance(loss, Exception) or loss.status_code != 200:
+            detail = loss if isinstance(loss, Exception) else f"{loss.status_code}: {loss.text[:200]}"
+            print(f"[GFW] tree cover loss query failed for {iso_code}: {detail}")
+            return None
 
-        if not rows:
+        alert_row = {}
+        if not isinstance(alerts, Exception) and alerts.status_code == 200:
+            alert_row = (alerts.json().get("data") or [{}])[0] or {}
+        return self._parse_api_response(iso_code, loss.json(), alert_row)
+
+    def _parse_api_response(self, iso_code: str, data: dict, alerts: Optional[dict] = None) -> dict:
+        """Region risk = the country's expert base risk, nudged by its loss trend.
+
+        Until 2026-11 the risk was average yearly loss divided by Brazil's 2.5 M ha,
+        which put a small, fast-clearing country like Ghana near zero. Now the
+        base risk (region_risk_fallback.json) stays the anchor and the live data
+        moves it by up to +/-0.1: the mean loss of the last 3 years against the
+        country's own 2011-2020 mean. Alerts are reported, not scored.
+        """
+        annual = {
+            int(r["umd_tree_cover_loss__year"]): round(r.get("total_loss_ha") or 0, 2)
+            for r in data.get("data", [])
+            if r.get("umd_tree_cover_loss__year")
+        }
+        if not annual:
             return self._get_fallback(iso_code)
 
-        # Calculate total and recent loss
-        total_loss = sum(r.get("total_loss_ha", 0) for r in rows)
-        recent_years = [r for r in rows if r.get("umd_tree_cover_loss__year", 0) >= 2018]
-        recent_loss = sum(r.get("total_loss_ha", 0) for r in recent_years)
+        years = sorted(annual)
+        recent_years = years[-3:]
+        recent_avg = sum(annual[y] for y in recent_years) / len(recent_years)
+        baseline = [annual[y] for y in years if 2011 <= y <= 2020]
+        baseline_avg = sum(baseline) / len(baseline) if baseline else 0.0
+        trend = recent_avg / baseline_avg if baseline_avg else 1.0
+        adjustment = max(-self.MAX_TREND_ADJUSTMENT, min(self.MAX_TREND_ADJUSTMENT, (trend - 1) * 0.1))
+        base = self._base_risk(iso_code)
 
-        # Build annual breakdown
-        annual = {
-            r.get("umd_tree_cover_loss__year"): round(r.get("total_loss_ha", 0), 2)
-            for r in rows
-        }
-
-        # Normalize to risk score (0-1)
-        # Based on Brazil (~2.5M ha/year) as the reference max
-        REFERENCE_MAX_ANNUAL = 2_500_000  # ha/year (Brazil benchmark)
-        avg_annual = total_loss / max(len(rows), 1)
-        normalized_risk = min(avg_annual / REFERENCE_MAX_ANNUAL, 1.0)
-
+        alerts = alerts or {}
         return {
             "status": "live_api",
             "iso_code": iso_code,
-            "normalized_risk": round(normalized_risk, 3),
-            "total_loss_ha": round(total_loss, 2),
-            "recent_loss_ha": round(recent_loss, 2),
-            "avg_annual_loss_ha": round(avg_annual, 2),
-            "years_covered": len(rows),
+            "normalized_risk": round(min(max(base + adjustment, 0.0), 1.0), 3),
+            "base_risk": base,
+            "trend_ratio": round(trend, 2),
+            "recent_years": f"{recent_years[0]}-{recent_years[-1]}",
+            "recent_avg_loss_ha": round(recent_avg),
+            "baseline_avg_loss_ha": round(baseline_avg) if baseline_avg else None,
+            "total_loss_ha": round(sum(annual.values()), 2),
+            "recent_loss_ha": round(sum(v for y, v in annual.items() if y >= 2018), 2),
+            "avg_annual_loss_ha": round(sum(annual.values()) / len(annual), 2),
+            "years_covered": len(annual),
             "annual_breakdown": annual,
-            "source": "Global Forest Watch API",
+            "alerts_90d_ha": round(alerts["area_ha"]) if alerts.get("area_ha") is not None else None,
+            "latest_alert": alerts.get("latest"),
+            "source": "Global Forest Watch Data API",
         }
+
+    def _base_risk(self, iso_code: str) -> float:
+        region = (self._fallback_data or {}).get(iso_code) or {}
+        return region.get("base_risk", 0.5)
 
     def _get_fallback(self, iso_code: str) -> dict:
         """Get fallback data for a country."""

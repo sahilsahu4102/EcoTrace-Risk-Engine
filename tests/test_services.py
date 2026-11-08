@@ -61,6 +61,28 @@ def test_trase_aggregates_all_fuzzy_matches(trase):
     assert res["deforestation_indicators"]["soy_deforestation_exposure"] == {"total": 2.0, "max": 2.0, "records": 5}
 
 
+def test_trase_matches_every_entity_of_a_group_and_keeps_pairs(tmp_path):
+    entities = {
+        f"cargill entity {i}": {"names": [f"CARGILL ENTITY {i}"], "total_records": 1, "commodities": ["Soy"],
+                                "regions": ["ARGENTINA"], "pairs": [["Soy", "ARGENTINA", 10.0]]}
+        for i in range(6)
+    }
+    entities["cargill cocoa sarl"] = {"names": ["CARGILL COCOA SARL"], "total_records": 1, "commodities": ["Cocoa"],
+                                      "regions": ["COTE D'IVOIRE"], "pairs": [["Cocoa", "COTE D'IVOIRE", 99.0]]}
+    entities["nestle sa"] = {"names": ["NESTLE SA"], "total_records": 1, "commodities": ["Cocoa"],
+                             "regions": ["GHANA"], "pairs": [["Cocoa", "GHANA", 1.0]]}
+    entities["cargillo farms"] = {"names": ["CARGILLO FARMS"], "total_records": 1, "commodities": ["Soy"],
+                                  "regions": ["BRAZIL"], "pairs": [["Soy", "BRAZIL", 5.0]]}
+    data = {"company_names": [n for e in entities.values() for n in e["names"]], "companies": entities}
+    svc = TraseService(data_dir=str(tmp_path / "raw"), preprocessed_path=_write_json(tmp_path, "t.json", data))
+
+    res = svc.search("Cargill")
+
+    assert res["matched_entities"] == 7  # all whole-word matches; the old top-5 fuzzy match dropped two
+    assert res["pairs"] == [["Cocoa", "COTE D'IVOIRE", 99.0], ["Soy", "ARGENTINA", 60.0]]  # not "cargillo"
+    assert svc.search("Nestlé")["matched_names"] == ["NESTLE SA"]
+
+
 def test_trase_search_does_not_mutate_loaded_data(trase):
     assert trase.search("Cargill Agricola") == trase.search("Cargill Agricola")
 
@@ -131,21 +153,49 @@ def http_get(monkeypatch):
     return get
 
 
-def test_gfw_live_response_is_normalized_and_cached(gfw, http_get):
-    http_get.return_value = httpx.Response(200, json={"data": [
-        {"umd_tree_cover_loss__year": 2017, "total_loss_ha": 1_000_000},
-        {"umd_tree_cover_loss__year": 2019, "total_loss_ha": 3_000_000},
-    ]})
+def _loss_rows(**loss_by_year):
+    return {"data": [{"umd_tree_cover_loss__year": int(y[1:]), "total_loss_ha": v} for y, v in loss_by_year.items()]}
+
+
+def _gfw_api(loss, alerts=None):
+    """Answer GFW queries by dataset: tree cover loss table, or the alerts table."""
+    def get(url, **kwargs):
+        if "integrated_alerts" in url:
+            return alerts if alerts is not None else httpx.Response(200, json={"data": [{"area_ha": None, "latest": None}]})
+        return loss
+    return get
+
+
+BASELINE = {f"y{y}": 1_000_000 for y in range(2011, 2021)}
+
+
+def test_gfw_live_trend_nudges_the_base_risk_and_reports_alerts(gfw, http_get):
+    http_get.side_effect = _gfw_api(
+        httpx.Response(200, json=_loss_rows(**BASELINE, y2022=500_000, y2023=500_000, y2024=500_000)),
+        httpx.Response(200, json={"data": [{"area_ha": 1234.4, "latest": "2026-11-05"}]}),
+    )
 
     first = asyncio.run(gfw.get_tree_loss("bra"))
     second = asyncio.run(gfw.get_tree_loss("BRA"))
 
     assert first["status"] == "live_api"
-    assert first["total_loss_ha"] == 4_000_000
-    assert first["recent_loss_ha"] == 3_000_000
-    assert first["normalized_risk"] == 0.8  # 2M ha/yr average vs 2.5M reference
+    assert first["trend_ratio"] == 0.5  # 2022-24 mean is half the 2011-20 mean
+    assert first["normalized_risk"] == 0.9  # base 0.95, trend -50 % -> -0.05
+    assert first["recent_years"] == "2022-2024" and first["recent_avg_loss_ha"] == 500_000
+    assert (first["alerts_90d_ha"], first["latest_alert"]) == (1234, "2026-11-05")
     assert second == first
-    assert http_get.await_count == 1
+    assert http_get.await_count == 2  # loss + alerts once; the second call is cached
+
+
+def test_gfw_trend_adjustment_is_capped(gfw, http_get):
+    http_get.side_effect = _gfw_api(httpx.Response(200, json=_loss_rows(**BASELINE, y2024=9_000_000)))
+    res = asyncio.run(gfw.get_tree_loss("BRA"))
+    assert res["normalized_risk"] == 1.0  # base 0.95 + at most 0.1, capped at 1
+
+
+def test_gfw_country_codes_are_validated_before_entering_sql(gfw, http_get):
+    assert asyncio.run(gfw.get_tree_loss("BR'; DROP"))["status"] == "unknown"
+    http_get.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -163,23 +213,30 @@ def test_gfw_failures_fall_back_to_local_data_without_retry(gfw, http_get, outco
 
     assert res["status"] == "fallback"
     assert res["normalized_risk"] == 0.95
-    assert http_get.await_count == 1
+    assert http_get.await_count == 2  # loss and alerts, each tried once
     asyncio.run(gfw.get_tree_loss("BRA"))
-    assert http_get.await_count == 2  # fallbacks are not cached, so the next call retries the API
+    assert http_get.await_count == 4  # fallbacks are not cached, so the next call retries the API
 
 
 def test_gfw_rate_limit_is_retried_then_falls_back(gfw, http_get):
     http_get.return_value = httpx.Response(429, text="Too Many Requests")
     assert asyncio.run(gfw.get_tree_loss("BRA"))["status"] == "fallback"
-    assert http_get.await_count == MAX_ATTEMPTS
+    assert http_get.await_count == 2 * MAX_ATTEMPTS
 
 
 def test_gfw_recovers_after_a_rate_limit(gfw, http_get):
-    http_get.side_effect = [
-        httpx.Response(429, headers={"Retry-After": "2"}),
-        httpx.Response(200, json={"data": [{"umd_tree_cover_loss__year": 2020, "total_loss_ha": 10}]}),
-    ]
+    loss = iter([httpx.Response(429, headers={"Retry-After": "2"}),
+                 httpx.Response(200, json=_loss_rows(y2020=10))])
+    http_get.side_effect = lambda url, **kw: (
+        httpx.Response(200, json={"data": [{}]}) if "integrated_alerts" in url else next(loss)
+    )
     assert asyncio.run(gfw.get_tree_loss("BRA"))["status"] == "live_api"
+
+
+def test_gfw_alerts_failure_keeps_the_live_loss_data(gfw, http_get):
+    http_get.side_effect = _gfw_api(httpx.Response(200, json=_loss_rows(**BASELINE)), httpx.Response(500, text="x"))
+    res = asyncio.run(gfw.get_tree_loss("BRA"))
+    assert res["status"] == "live_api" and res["alerts_90d_ha"] is None
 
 
 def test_gfw_countries_are_fetched_concurrently(gfw, monkeypatch):
@@ -220,9 +277,9 @@ RELEVANT_HTML = (
 )
 
 
-def test_scrape_returns_first_relevant_page(monkeypatch):
+def test_scrape_returns_a_relevant_page(monkeypatch):
     scraper = CSRScraper()
-    urls = [p.format(domain=d) for d in scraper._generate_domains("Acme Foods") for p in scraper.URL_PATTERNS]
+    urls = scraper._candidate_urls("Acme Foods")
     relevant = "deforestation sourcing supply chain " * 20
     pages = {urls[2]: {"text": "cookie banner " * 30}, urls[3]: {"text": relevant}}
     fetch = AsyncMock(side_effect=lambda url: pages.get(url))
@@ -232,8 +289,8 @@ def test_scrape_returns_first_relevant_page(monkeypatch):
 
     assert res["status"] == "success"
     assert res["url"] == urls[3]
-    assert fetch.await_count == 4  # stops at the first relevant page
-    assert res["urls_tried"] == len(urls)
+    assert fetch.await_count == len(urls)  # all candidates are fetched concurrently
+    assert res["urls_tried"] == len(urls) <= CSRScraper.MAX_CANDIDATES
 
 
 def test_scrape_not_found_after_all_candidates(monkeypatch):
@@ -243,7 +300,18 @@ def test_scrape_not_found_after_all_candidates(monkeypatch):
     res = asyncio.run(scraper.scrape("Procter Gamble"))
 
     assert res["status"] == "not_found"
-    assert res["urls_tried"] == 5 * len(CSRScraper.URL_PATTERNS)  # 5 candidate domains
+    assert res["urls_tried"] == CSRScraper.MAX_CANDIDATES
+
+
+def test_scrape_gives_up_when_the_time_budget_runs_out(monkeypatch):
+    scraper = CSRScraper()
+    scraper.TIME_BUDGET = 0.05
+
+    async def slow(url):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(scraper, "_fetch_and_extract", slow)
+    assert asyncio.run(scraper.scrape("Acme"))["status"] == "not_found"
 
 
 def test_scrape_caps_text_at_10k_chars(monkeypatch):
@@ -255,17 +323,27 @@ def test_scrape_caps_text_at_10k_chars(monkeypatch):
     assert res["text_length"] > 10_000
 
 
-def test_scrapingdog_rate_limit_falls_back_to_direct_fetch(http_get):
+def test_candidate_domains_keep_accented_names():
+    assert CSRScraper()._generate_domains("Nestlé")[0] == "https://www.nestle.com"
+
+
+def test_blocked_site_is_read_through_the_reader(http_get):
     scraper = CSRScraper()
-    scraper.api_key = "test-key"
+    relevant = "Our deforestation policy covers palm oil sourcing and the supply chain. " * 10
     http_get.side_effect = lambda url, **kw: (
-        httpx.Response(429, text="Limit reached") if "scrapingdog" in url else httpx.Response(200, text=RELEVANT_HTML)
+        httpx.Response(200, text=relevant) if url.startswith(CSRScraper.READER_URL) else httpx.Response(403, text="denied")
     )
 
     res = asyncio.run(scraper._fetch_and_extract("https://www.acme.com/sustainability"))
 
-    assert res["source"] == "direct"
-    assert http_get.await_count == MAX_ATTEMPTS + 1  # Scrapingdog retried, then one direct fetch
+    assert res["source"] == "jina_reader"
+    assert http_get.await_count == 2  # one direct attempt, then the reader
+
+
+def test_reader_error_page_is_not_used(http_get):
+    http_get.return_value = httpx.Response(
+        200, text="Title: \nWarning: Target URL returned error 404: Not Found " + "x" * 200)
+    assert asyncio.run(CSRScraper()._fetch_via_reader("https://www.acme.com/nope")) is None
 
 
 def test_extract_text_drops_scripts_and_page_chrome():

@@ -556,15 +556,29 @@ def _region_to_dict(
 
 
 import os
+import re
 import json
 import httpx
 from dotenv import load_dotenv
 
-from app.services.http_retry import with_retry
-
 load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "")
+# Free OpenRouter models, tried in order after OPENROUTER_MODEL. Until 2026-11 the only
+# model was the paid meta-llama/llama-3.3-70b-instruct: on an account with no credits
+# every call returned 402 and extraction silently fell back to keywords (its ":free"
+# variant no longer exists). Free models come and go, so a 402, 404 or 429 moves on
+# to the next one instead of giving up.
+FREE_MODELS = [
+    m.strip()
+    for m in os.getenv(
+        "OPENROUTER_FREE_MODELS",
+        "nvidia/nemotron-3-ultra-550b-a55b:free,google/gemma-4-31b-it:free,"
+        "nvidia/nemotron-3.5-super-vl:free,nvidia/nemotron-3.5-lightning:free",
+    ).split(",")
+    if m.strip()
+]
+_SKIP_TO_NEXT_MODEL = {402, 404, 408, 429, 500, 502, 503, 504}
 
 def _fallback_extract_entities(text: str) -> ExtractionResult:
     """Fallback keyword matcher if LLM fails or is unconfigured."""
@@ -634,22 +648,24 @@ CRITICAL RULES:
     # Cap text length at 40,000 characters to prevent expensive token usage
     text_to_analyze = text[:40000]
 
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Extract supply chain entities from the following text:\\n\\n{text_to_analyze}"}
-        ],
-        "temperature": 0.0,
-    }
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Extract supply chain entities from the following text:\n\n{text_to_analyze}"}
+    ]
 
     try:
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            response = await with_retry(
-                lambda: client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
-            )
-            
-            if response.status_code == 200:
+        response = None
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for model in dict.fromkeys(m for m in [OPENROUTER_MODEL, *FREE_MODELS] if m):
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions", headers=headers,
+                    json={"model": model, "messages": messages, "temperature": 0.0},
+                )
+                if response.status_code not in _SKIP_TO_NEXT_MODEL:
+                    break
+                print(f"[LLM] {model} unavailable ({response.status_code}), trying the next model")
+
+            if response is not None and response.status_code == 200:
                 data = response.json()
                 content = data["choices"][0]["message"]["content"].strip()
                 
@@ -660,7 +676,14 @@ CRITICAL RULES:
                     content = content[3:-3].strip()
 
                 try:
-                    parsed = json.loads(content)
+                    try:
+                        parsed = json.loads(content)
+                    except json.JSONDecodeError:
+                        # Some free models wrap the JSON in prose; take the outermost object
+                        match = re.search(r"\{.*\}", content, re.DOTALL)
+                        if not match:
+                            raise
+                        parsed = json.loads(match.group(0))
                     found_commodities_raw = parsed.get("commodities", [])
                     # Support both old and new format
                     found_sourcing_raw = parsed.get("sourcing_countries", parsed.get("regions", []))
@@ -731,7 +754,8 @@ CRITICAL RULES:
                 )
 
             else:
-                print(f"OpenRouter API Error: {response.status_code} - {response.text}")
+                detail = f"{response.status_code} - {response.text[:200]}" if response is not None else "no model configured"
+                print(f"OpenRouter API Error: {detail}")
                 return _fallback_extract_entities(text)
 
     except Exception as e:
