@@ -571,10 +571,10 @@ OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "")
 # to the next one instead of giving up.
 FREE_MODELS = [
     m.strip()
-    for m in os.getenv(
-        "OPENROUTER_FREE_MODELS",
-        "nvidia/nemotron-3-ultra-550b-a55b:free,google/gemma-4-31b-it:free,"
-        "nvidia/nemotron-3.5-super-vl:free,nvidia/nemotron-3.5-lightning:free",
+    for m in (
+        os.getenv("OPENROUTER_FREE_MODELS")  # an empty variable counts as unset
+        or "nvidia/nemotron-3-ultra-550b-a55b:free,google/gemma-4-31b-it:free,"
+        "nvidia/nemotron-3.5-super-vl:free,nvidia/nemotron-3.5-lightning:free"
     ).split(",")
     if m.strip()
 ]
