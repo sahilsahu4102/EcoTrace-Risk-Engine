@@ -1,114 +1,108 @@
 "use client";
 
-import React, { useMemo } from 'react';
-import { ReactFlow, Background, Controls, Edge, Node, MarkerType } from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import { CommodityRegionBreakdown } from '@/lib/api';
+import React, { useEffect, useMemo, useState } from "react";
+import { ReactFlow, Background, Edge, Node, MarkerType, Position } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { CommodityRegionBreakdown } from "@/lib/api";
+import { Mark } from "@/components/form";
 
 interface SupplyChainGraphProps {
   company: string;
   breakdown: CommodityRegionBreakdown[];
 }
 
+const INK = "#14181f";
+const PAPER = "#f2f2ee";
+const PAPER_2 = "#e8e8e1";
+const TRADE = "Trase trade records";
+
+const nodeBase = {
+  fontFamily: "var(--font-barlow), system-ui, sans-serif",
+  fontSize: 14,
+  color: INK,
+  borderRadius: 0,
+  padding: "8px 10px",
+  width: 150,
+  textAlign: "center" as const,
+  boxShadow: "none",
+};
+// Lines run left to right: countries, then commodities, then the company.
+const flow = { sourcePosition: Position.Right, targetPosition: Position.Left };
+
+/** Countries on the left, commodities in the middle, the company on the right.
+ *  A solid line is a Trase trade record; a dashed line is a producer-country link. */
 export default function SupplyChainGraph({ company, breakdown }: SupplyChainGraphProps) {
-  // Compute unique regions and commodities from breakdown
+  // On a phone the three-column graph cannot fit at a readable size, so the same links
+  // are listed grouped by commodity instead.
+  // This component only renders in the browser (dynamic import, ssr: false), so window exists.
+  const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 720px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 720px)");
+    const sync = () => setNarrow(mq.matches);
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
   const { nodes, edges } = useMemo(() => {
-    // 1. Gather unique
     const uniqueRegions = Array.from(new Set(breakdown.map((b) => b.region)));
     const uniqueCommodities = Array.from(new Set(breakdown.map((b) => b.commodity)));
 
     const newNodes: Node[] = [];
     const newEdges: Edge[] = [];
 
-    // Helper functions for positioning
-    const xSpacing = 300;
-    const ySpacing = 80;
-
-    // Center heights based on counts
+    const xSpacing = 270;
+    const ySpacing = 72;
     const maxItems = Math.max(uniqueRegions.length, uniqueCommodities.length, 1);
-    const canvasHeight = maxItems * ySpacing;
-    const midY = canvasHeight / 2;
+    const midY = (maxItems * ySpacing) / 2;
 
-    // --- Create Source Nodes (Regions) ---
     const rStartY = midY - (uniqueRegions.length * ySpacing) / 2;
     uniqueRegions.forEach((region, i) => {
       newNodes.push({
         id: `r-${region}`,
-        position: { x: 50, y: rStartY + i * ySpacing + 20 },
+        position: { x: 0, y: rStartY + i * ySpacing },
         data: { label: region },
-        type: 'input',
-        style: {
-          background: "var(--card-bg)",
-          color: "var(--text-primary)",
-          border: "1px solid var(--border-color)",
-          borderRadius: "8px",
-          padding: "10px",
-          width: 140,
-          textAlign: "center",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-        },
+        type: "input",
+        ...flow,
+        style: { ...nodeBase, background: PAPER_2, border: `1px solid ${INK}` },
       });
     });
 
-    // --- Create Mid Nodes (Commodities) ---
     const cStartY = midY - (uniqueCommodities.length * ySpacing) / 2;
     uniqueCommodities.forEach((commodity, i) => {
       newNodes.push({
         id: `c-${commodity}`,
-        position: { x: 50 + xSpacing, y: cStartY + i * ySpacing + 20 },
+        position: { x: xSpacing, y: cStartY + i * ySpacing },
         data: { label: commodity },
-        style: {
-          background: "rgba(16, 185, 129, 0.1)", // emerald tint
-          color: "var(--accent-emerald)",
-          border: "1px solid rgba(16, 185, 129, 0.3)",
-          borderRadius: "20px", // pill shape
-          padding: "10px",
-          width: 140,
-          textAlign: "center",
-          fontWeight: "bold",
-        },
+        ...flow,
+        style: { ...nodeBase, background: PAPER, border: `2px solid ${INK}`, fontWeight: 600 },
       });
 
-      // Edge from commodity to company
       newEdges.push({
         id: `e-c-${commodity}-comp`,
         source: `c-${commodity}`,
-        target: 'company',
-        animated: true,
-        style: { stroke: "var(--accent-emerald)", strokeWidth: 2 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: "var(--accent-emerald)" },
+        target: "company",
+        style: { stroke: INK, strokeWidth: 1.5 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: INK },
       });
     });
 
-    // --- Create Target Node (Company) ---
     newNodes.push({
-      id: 'company',
-      position: { x: 50 + xSpacing * 2, y: midY },
+      id: "company",
+      position: { x: xSpacing * 2, y: midY - 20 },
       data: { label: company },
-      type: 'output',
-      style: {
-        background: "var(--accent-emerald)",
-        color: "#fff",
-        border: "none",
-        borderRadius: "8px",
-        padding: "12px",
-        width: 160,
-        textAlign: "center",
-        fontWeight: "bold",
-        fontSize: "1rem",
-        boxShadow: "0 0 20px rgba(16, 185, 129, 0.4)",
-      },
+      type: "output",
+      ...flow,
+      style: { ...nodeBase, width: 170, background: INK, color: PAPER, border: `1px solid ${INK}`, fontWeight: 700, fontSize: 16 },
     });
 
-    // --- Create Edges (Region -> Commodity) ---
     breakdown.forEach((b) => {
+      const trade = b.evidence === TRADE;
       newEdges.push({
         id: `e-r-${b.region}-c-${b.commodity}`,
         source: `r-${b.region}`,
         target: `c-${b.commodity}`,
-        animated: true, // indicates flow
-        style: { stroke: "var(--text-muted)", strokeWidth: 1.5, strokeDasharray: "5,5" },
-        markerEnd: { type: MarkerType.ArrowClosed, color: "var(--text-muted)" },
+        style: { stroke: INK, strokeWidth: 1.25, strokeDasharray: trade ? undefined : "5 4" },
+        markerEnd: { type: MarkerType.ArrowClosed, color: INK },
       });
     });
 
@@ -117,24 +111,54 @@ export default function SupplyChainGraph({ company, breakdown }: SupplyChainGrap
 
   if (breakdown.length === 0) {
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}>
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#5a616d" }}>
         No clear supply chain trace available for this company.
       </div>
     );
   }
 
+  if (narrow) {
+    const commodities = Array.from(new Set(breakdown.map((b) => b.commodity)));
+    return (
+      <ul className="chain">
+        {commodities.map((c) => (
+          <li key={c}>
+            <p className="chain-head">
+              <b>{c}</b> <span>to {company}</span>
+            </p>
+            <ul className="chips">
+              {breakdown
+                .filter((b) => b.commodity === c)
+                .map((b) => (
+                  <li key={b.region} className="chip">
+                    <Mark kind={b.evidence === TRADE ? "solid" : "hollow"} />
+                    {b.region}
+                  </li>
+                ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
   return (
-    <div style={{ width: '100%', height: '100%', minHeight: 400 }}>
+    <div style={{ width: "100%", height: "100%" }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
         fitView
+        fitViewOptions={{ padding: 0.08 }}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
+        panOnDrag={false}
+        zoomOnScroll={false}
+        zoomOnPinch={false}
+        zoomOnDoubleClick={false}
+        preventScrolling={false}
       >
-        <Background gap={16} size={1} color="rgba(255,255,255,0.05)" />
-        <Controls showInteractive={false} />
+        <Background gap={20} size={1} color="#bdb8a8" />
       </ReactFlow>
     </div>
   );

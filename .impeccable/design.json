@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-09T13:48:12Z",
+  "title": "Design System: EcoTrace",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Form Paper",
+        "canonical": "#f2f2ee",
+        "tonalRamp": [
+          "#0b0d11",
+          "#4d4e50",
+          "#8f908f",
+          "#d1d1ce",
+          "#f4f4f0",
+          "#f7f7f5",
+          "#fafaf9",
+          "#fefefd"
+        ]
+      },
+      "paper-sunk": {
+        "role": "neutral",
+        "displayName": "Sunk Paper",
+        "canonical": "#e8e8e1",
+        "tonalRamp": [
+          "#0b0d11",
+          "#4a4c4c",
+          "#898a88",
+          "#c8c9c3",
+          "#ebebe5",
+          "#f1f1ed",
+          "#f7f7f4",
+          "#fdfdfc"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Printer's Ink",
+        "canonical": "#14181f",
+        "tonalRamp": [
+          "#0b0d11",
+          "#0e1015",
+          "#101319",
+          "#13161d",
+          "#32363c",
+          "#6f7175",
+          "#abacaf",
+          "#e8e8e9"
+        ]
+      },
+      "ink-secondary": {
+        "role": "neutral",
+        "displayName": "Secondary Ink",
+        "canonical": "#434a55",
+        "tonalRamp": [
+          "#0b0d11",
+          "#1b1e24",
+          "#2b3038",
+          "#3b414b",
+          "#5b616b",
+          "#8c9097",
+          "#bcbec2",
+          "#ecedee"
+        ]
+      },
+      "ink-muted": {
+        "role": "neutral",
+        "displayName": "Muted Ink",
+        "canonical": "#5a616d",
+        "tonalRamp": [
+          "#0b0d11",
+          "#22252b",
+          "#383d46",
+          "#4f5560",
+          "#6f7580",
+          "#9a9ea5",
+          "#c4c7cb",
+          "#eeeff0"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline Rule",
+        "canonical": "#bdb8a8",
+        "tonalRamp": [
+          "#0b0d11",
+          "#3e3e3c",
+          "#716f67",
+          "#a4a092",
+          "#c5c1b3",
+          "#d6d3ca",
+          "#e7e6e0",
+          "#f8f8f6"
+        ]
+      },
+      "form-vermilion": {
+        "role": "primary",
+        "displayName": "Form Vermilion",
+        "canonical": "#b73a18",
+        "tonalRamp": [
+          "#0b0d11",
+          "#3c1a13",
+          "#6d2715",
+          "#9e3417",
+          "#c05336",
+          "#d38671",
+          "#e5b9ac",
+          "#f8ebe8"
+        ]
+      },
+      "stamp-blue": {
+        "role": "secondary",
+        "displayName": "Stamp Blue",
+        "canonical": "#26407a",
+        "tonalRamp": [
+          "#0b0d11",
+          "#131c2f",
+          "#1a2a4d",
+          "#22396b",
+          "#42598b",
+          "#7a8aad",
+          "#b2bbd0",
+          "#e9ecf2"
+        ]
+      },
+      "entry-white": {
+        "role": "neutral",
+        "displayName": "Entry White",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0d11",
+          "#515255",
+          "#969799",
+          "#dcdcdd",
+          "#ffffff",
+          "#ffffff",
+          "#ffffff",
+          "#ffffff"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Home headline and subject name."
+      },
+      "score": {
+        "displayName": "Score",
+        "purpose": "The one big figure per result."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Box labels, table heads, tags."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Stamp settles onto the result once, 220ms; disabled under prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "stack-boxes",
+        "value": "900px"
+      },
+      {
+        "name": "stack-tables",
+        "value": "720px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one filled action on a screen.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Run assessment</button>",
+      "css": ".ds-btn{font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-weight:700;font-size:17px;letter-spacing:.1em;text-transform:uppercase;height:48px;padding:0 24px;border:0;border-radius:0;cursor:pointer}.ds-btn-primary{background:#14181f;color:#f2f2ee}.ds-btn-primary:hover{background:#b73a18}.ds-btn-primary:focus-visible{outline:2px solid #26407a;outline-offset:2px}"
+    },
+    {
+      "name": "Line Button",
+      "kind": "button",
+      "refersTo": "button-line",
+      "description": "Secondary action, outlined.",
+      "html": "<button class=\"ds-btn ds-btn-line\">Try again</button>",
+      "css": ".ds-btn{font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-weight:700;font-size:17px;letter-spacing:.1em;text-transform:uppercase;height:48px;padding:0 24px;border:0;border-radius:0;cursor:pointer}.ds-btn-line{background:transparent;color:#14181f;border:1.5px solid #14181f}.ds-btn-line:hover{background:#14181f;color:#f2f2ee}.ds-btn-line:focus-visible{outline:2px solid #26407a;outline-offset:2px}"
+    },
+    {
+      "name": "Entry Field",
+      "kind": "input",
+      "refersTo": "entry-field",
+      "description": "The typing field, the only white cell on the sheet.",
+      "html": "<div class=\"ds-entry\"><input placeholder=\"Cargill, or Palm Oil\" aria-label=\"Company or commodity\"></div>",
+      "css": ".ds-entry{border:1.5px solid #14181f;background:#fff}.ds-entry input{width:100%;border:0;background:transparent;font-family:Barlow,sans-serif;font-size:22px;padding:14px 16px;outline:none;caret-color:#b73a18}.ds-entry:focus-within{outline:2px solid #26407a;outline-offset:2px}"
+    },
+    {
+      "name": "Risk Stamp",
+      "kind": "custom",
+      "refersTo": "stamp",
+      "description": "Risk level as a bordered word; the border style also says the level.",
+      "html": "<span class=\"ds-stamp ds-stamp-critical\">critical</span> <span class=\"ds-stamp ds-stamp-high\">high</span> <span class=\"ds-stamp ds-stamp-moderate\">moderate</span> <span class=\"ds-stamp ds-stamp-low\">low</span> <span class=\"ds-stamp ds-stamp-minimal\">minimal</span>",
+      "css": ".ds-stamp{display:inline-block;font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-weight:700;font-size:14px;letter-spacing:.14em;text-transform:uppercase;padding:3px 10px 2px;border:1.5px solid #14181f;color:#14181f}.ds-stamp-critical{background:#14181f;color:#f2f2ee}.ds-stamp-high{border:4px double #14181f;padding:1px 8px 0}.ds-stamp-low{border-style:dashed}.ds-stamp-minimal{border:2px dotted #14181f}"
+    },
+    {
+      "name": "Evidence Mark",
+      "kind": "custom",
+      "refersTo": "chip",
+      "description": "Square mark plus word: filled, hollow, dashed.",
+      "html": "<span class=\"ds-ev\"><svg viewBox=\"0 0 12 12\" width=\"12\" height=\"12\"><rect x=\"0.75\" y=\"0.75\" width=\"10.5\" height=\"10.5\" fill=\"currentColor\" stroke=\"currentColor\" stroke-width=\"1.5\"/></svg> Trade records</span> <span class=\"ds-ev\"><svg viewBox=\"0 0 12 12\" width=\"12\" height=\"12\"><rect x=\"0.75\" y=\"0.75\" width=\"10.5\" height=\"10.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"/></svg> Producer country</span>",
+      "css": ".ds-ev{display:inline-flex;align-items:center;gap:6px;font-family:Barlow,sans-serif;font-size:15px;color:#14181f;margin-right:16px}"
+    },
+    {
+      "name": "Box Label",
+      "kind": "custom",
+      "refersTo": "label",
+      "description": "Numbered label on a form box; the number is vermilion.",
+      "html": "<div class=\"ds-label\"><span>6</span>Basis: commodity-country pairs</div>",
+      "css": ".ds-label{display:flex;align-items:baseline;gap:8px;font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-weight:600;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:#434a55}.ds-label span{color:#b73a18;font-weight:700;font-size:16px;letter-spacing:0}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Bill of Lading",
+    "overview": "EcoTrace presents an assessment the way customs and shipping paperwork presents a consignment: one pre-printed sheet, numbered boxes, one answer per box, every entry traceable to its source.",
+    "keyCharacteristics": [
+      "One sheet of numbered boxes ruled in 1px ink, outer rule 1.5px.",
+      "Vermilion appears only on box numbers, the score figure, and the scale pin.",
+      "Risk level is a stamp whose border style (filled, double, single, dashed, dotted) and word both say the level.",
+      "Evidence class is a square mark (filled, hollow, dashed) beside a word, never a colour.",
+      "Square corners everywhere. No gradients, glass, glow or decorative motion."
+    ],
+    "rules": [
+      {
+        "name": "The One Ink Rule",
+        "body": "Vermilion is for the entry a reader is meant to find first. If two things on a screen are vermilion, one is wrong.",
+        "section": "colors"
+      },
+      {
+        "name": "The No-Colour-Alone Rule",
+        "body": "Every state has a word and a drawn mark. Greyscale must lose nothing.",
+        "section": "colors"
+      },
+      {
+        "name": "The Measure Rule",
+        "body": "Prose never runs wider than 68 to 76 characters, even inside a full-width box.",
+        "section": "typography"
+      },
+      {
+        "name": "The Ruled-Not-Raised Rule",
+        "body": "If something needs separating, rule it. Never lift it.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do put the evidence directly under the verdict and number every box that text refers to.",
+      "Do say how old the data is and which sources are static (Trase, Forest 500) or live (Global Forest Watch).",
+      "Do give every slow or failing request an honest message and a way out.",
+      "Do keep a word beside every mark and every colour."
+    ],
+    "donts": [
+      "Don't add gradients, glass, glow, blurred blobs, drop shadows or rounded cards.",
+      "Don't use emoji or glyphs as icons; draw marks or use the icon library at one stroke weight.",
+      "Don't print a number that was not checked against code or data, and never call static data live.",
+      "Don't put a label above a heading as an eyebrow.",
+      "Don't use vermilion for anything but box numbers, the score, and its pin."
+    ]
+  }
+}

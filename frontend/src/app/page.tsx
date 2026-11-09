@@ -1,33 +1,62 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { Search, TreePine, AlertTriangle, Globe, Clock } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { healthCheck } from "@/lib/api";
+import { Box, Footer, Mark, Masthead } from "@/components/form";
 
-const SUGGESTIONS = [
-  { label: "Unilever", icon: "🧴" },
-  { label: "Cargill", icon: "🌾" },
-  { label: "JBS", icon: "🥩" },
-  { label: "Wilmar", icon: "🌴" },
-  { label: "Nestlé", icon: "☕" },
-  { label: "Palm Oil", icon: "🌴" },
-  { label: "Cocoa", icon: "🍫" },
-  { label: "Soy", icon: "🌾" },
+const COMPANIES = ["Unilever", "Cargill", "JBS", "Wilmar", "Nestlé"];
+const COMMODITIES = ["Palm Oil", "Cocoa", "Soy"];
+
+// Descriptions follow the methodology note the API returns with every result.
+const SOURCES: { name: string; desc: string; kind: string }[] = [
+  {
+    name: "Company sustainability page",
+    desc: "Read when you search: fetched directly, or through Jina Reader when the site blocks that. An AI model then extracts commodities and countries.",
+    kind: "Read per lookup",
+  },
+  {
+    name: "Trase trade records",
+    desc: "Which commodity leaves which country, per company.",
+    kind: "Static dataset",
+  },
+  {
+    name: "Forest 500",
+    desc: "Company forest-policy scores, which adjust the total.",
+    kind: "Static dataset",
+  },
+  {
+    name: "Global Forest Watch",
+    desc: "Tree-cover-loss trend and deforestation alerts by country.",
+    kind: "Live API",
+  },
 ];
+
+type Server = "checking" | "waking" | "ready" | "down";
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [server, setServer] = useState<Server>("checking");
   const router = useRouter();
 
   // Wake the backend while the visitor reads the page: the free host sleeps after
-  // 15 idle minutes and takes up to a minute to start.
-  useEffect(() => {
-    healthCheck().catch(() => {});
+  // 15 idle minutes and takes up to a minute to start. The status line reports what
+  // actually happened to this request, nothing more.
+  const checkServer = useCallback(() => {
+    setServer("checking");
+    const slow = setTimeout(() => setServer((s) => (s === "checking" ? "waking" : s)), 4000);
+    healthCheck()
+      .then(() => setServer("ready"))
+      .catch(() => setServer("down"))
+      .finally(() => clearTimeout(slow));
   }, []);
+
+  useEffect(() => {
+    checkServer();
+  }, [checkServer]);
 
   // Load recent searches from localStorage on mount
   useEffect(() => {
@@ -44,10 +73,10 @@ export default function HomePage() {
   const handleSearch = (company: string) => {
     const term = company.trim();
     if (!term) return;
-    
+
     // Save to localStorage
     try {
-      const updated = [term, ...recentSearches.filter(s => s.toLowerCase() !== term.toLowerCase())].slice(0, 5);
+      const updated = [term, ...recentSearches.filter((s) => s.toLowerCase() !== term.toLowerCase())].slice(0, 5);
       localStorage.setItem("ecotrace_recent", JSON.stringify(updated));
       setRecentSearches(updated);
     } catch (e) {
@@ -59,254 +88,136 @@ export default function HomePage() {
   };
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "40px 20px",
-        position: "relative",
-      }}
-    >
-      {/* Top right history button */}
-      <motion.div 
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.1 }}
-        style={{ position: 'absolute', top: 24, right: 24 }}
-      >
-        <button
-           onClick={() => router.push('/history')}
-           style={{
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 20,
-              padding: '8px 16px',
-              color: 'var(--text-secondary)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              fontSize: '0.875rem',
-              cursor: 'pointer',
-           }}
-        >
-          <Clock size={16} />
-          Global History
-        </button>
-      </motion.div>
+    <div className="page">
+      <Masthead />
+      <main className="sheet">
+        <div className="col">
+          <div className="box">
+            <h1 className="display h1-home">
+              A <span className="nowrap">deforestation-risk</span> score you can trace to its sources.
+            </h1>
+            <p className="lede">
+              Enter a company or a commodity. EcoTrace scores it from 0 to 100 and shows the evidence behind every part of the score, with the date of the data
+              and what is missing.
+            </p>
+          </div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: "easeOut" }}
-        style={{ textAlign: "center", maxWidth: 720, width: "100%" }}
-      >
-        {/* Logo */}
-        <motion.div
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 72,
-            height: 72,
-            borderRadius: 20,
-            background: "rgba(16, 185, 129, 0.1)",
-            border: "1px solid rgba(16, 185, 129, 0.2)",
-            marginBottom: 32,
-          }}
-        >
-          <TreePine size={36} color="#10b981" />
-        </motion.div>
+          <Box n={1} label="Company or commodity">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSearch(query);
+              }}
+            >
+              <div className="entry">
+                <input
+                  id="q"
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Cargill, or Palm Oil"
+                  aria-label="Company or commodity"
+                  autoComplete="off"
+                  disabled={loading}
+                  autoFocus
+                />
+                <button type="submit" className="btn" disabled={loading || !query.trim()}>
+                  {loading ? "Opening…" : "Run assessment"}
+                </button>
+              </div>
+            </form>
+          </Box>
 
-        {/* Title */}
-        <h1
-          style={{
-            fontSize: "clamp(2rem, 5vw, 3.5rem)",
-            fontWeight: 800,
-            lineHeight: 1.1,
-            marginBottom: 16,
-            background: "linear-gradient(135deg, #f1f5f9 0%, #94a3b8 100%)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-          }}
-        >
-          EcoTrace-Risk-Engine
-        </h1>
+          <Box n={2} label="Or pick an example">
+            <div className="chips-two">
+              <div>
+                <p className="fine" id="ex-co">Companies</p>
+                <ul className="pick-list" aria-labelledby="ex-co">
+                  {COMPANIES.map((c) => (
+                    <li key={c}>
+                      <button className="pick" onClick={() => handleSearch(c)} disabled={loading}>
+                        {c}
+                        <ArrowUpRight size={16} aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="fine" id="ex-cm">Commodities</p>
+                <ul className="pick-list" aria-labelledby="ex-cm">
+                  {COMMODITIES.map((c) => (
+                    <li key={c}>
+                      <button className="pick" onClick={() => handleSearch(c)} disabled={loading}>
+                        {c}
+                        <ArrowUpRight size={16} aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </Box>
 
-        <div style={{ fontSize: "1.5rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: 12 }}>
-          How risky is your supply chain?
+          {recentSearches.length > 0 && (
+            <Box label="Your recent searches">
+              <ul className="pick-list">
+                {recentSearches.map((s) => (
+                  <li key={`recent-${s}`}>
+                    <button className="pick" onClick={() => handleSearch(s)} disabled={loading}>
+                      {s}
+                      <ArrowUpRight size={16} aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Box>
+          )}
         </div>
 
-        {/* Subtitle */}
-        <p
-          style={{
-            color: "var(--text-secondary)",
-            fontSize: "1.125rem",
-            marginBottom: 40,
-            lineHeight: 1.6,
-          }}
-        >
-          Analyze deforestation risk using real data from{" "}
-          <span style={{ color: "var(--accent-emerald)" }}>Trase</span>,{" "}
-          <span style={{ color: "var(--accent-blue)" }}>Forest 500</span>, and{" "}
-          <span style={{ color: "var(--accent-amber)" }}>
-            Global Forest Watch
-          </span>
-        </p>
-
-        {/* Search Bar - Flexbox fix for the generic transform clipping issue */}
-        <motion.form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSearch(query);
-          }}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            background: "var(--card-bg)",
-            border: "1px solid var(--border-color)",
-            borderRadius: 16,
-            padding: "8px 8px 8px 24px",
-            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.2)",
-            width: "100%",
-            maxWidth: 500,
-            margin: "0 auto 24px auto",
-          }}
-        >
-          <Search size={20} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Enter company name or product category (e.g., Palm Oil)..."
-            style={{ 
-              flex: 1,
-              border: "none",
-              outline: "none",
-              background: "transparent",
-              padding: "12px 16px",
-              fontSize: "1rem",
-              color: "var(--text-primary)",
-              minWidth: 0, // allows input to shrink in flex containers
-            }}
-            disabled={loading}
-            autoFocus
-          />
-          {query.trim() && (
-            <motion.button
-              type="submit"
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              disabled={loading}
-              style={{
-                background: "var(--accent-emerald)",
-                color: "#fff",
-                border: "none",
-                borderRadius: 12,
-                padding: "12px 24px",
-                fontWeight: 600,
-                cursor: "pointer",
-                fontSize: "0.875rem",
-                flexShrink: 0,
-              }}
-            >
-              {loading ? "Analyzing..." : "Analyze"}
-            </motion.button>
-          )}
-        </motion.form>
-
-        {/* Memory/History Chips Context */}
-        <motion.div
-           initial={{ opacity: 0 }}
-           animate={{ opacity: 1 }}
-           transition={{ delay: 0.5 }}
-           style={{
-             display: "flex",
-             flexDirection: "column",
-             gap: 16,
-             alignItems: "center",
-           }}
-        >
-          {recentSearches.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-              <span style={{ color: "var(--text-muted)", fontSize: "0.8125rem", alignSelf: "center", marginRight: 4, display: "flex", alignItems: "center", gap: 4 }}>
-                <Clock size={14} /> Recent:
-              </span>
-              {recentSearches.map((s) => (
-                <button
-                  key={`recent-${s}`}
-                  className="chip"
-                  onClick={() => handleSearch(s)}
-                  disabled={loading}
-                  style={{ background: "rgba(255, 255, 255, 0.05)" }}
-                >
-                  {s}
-                </button>
+        <div className="col col-right">
+          <Box label="How the score is built">
+            <ul className="sources">
+              {SOURCES.map((s) => (
+                <li key={s.name}>
+                  <strong>{s.name}</strong>
+                  <span className="tag">{s.kind}</span>
+                  <span className="desc">{s.desc}</span>
+                </li>
               ))}
-            </div>
-          )}
+            </ul>
+            <p className="prose-sm" style={{ marginTop: 16 }}>
+              The score averages commodity weight × country risk over the commodity-country pairs that the evidence supports. Every result prints its methodology
+              and limits.
+            </p>
+          </Box>
 
-          {/* Suggestion Chips */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-            <span style={{ color: "var(--text-muted)", fontSize: "0.8125rem", alignSelf: "center", marginRight: 4 }}>
-              Try:
-            </span>
-            {SUGGESTIONS.map((s) => (
-              <button
-                key={s.label}
-                className="chip"
-                onClick={() => handleSearch(s.label)}
-                disabled={loading}
-              >
-                <span>{s.icon}</span>
-                {s.label}
-              </button>
-            ))}
-          </div>
-        </motion.div>
-
-        {/* Stats Bar */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.8 }}
-          style={{
-            marginTop: 64,
-            display: "flex",
-            justifyContent: "center",
-            gap: 48,
-            flexWrap: "wrap",
-          }}
-        >
-          {[
-            { icon: <Globe size={16} />, label: "40+ Countries" },
-            { icon: <AlertTriangle size={16} />, label: "15 Commodities" },
-            { icon: <TreePine size={16} />, label: "4 Data Sources" },
-          ].map((stat) => (
-            <div
-              key={stat.label}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                color: "var(--text-muted)",
-                fontSize: "0.8125rem",
-              }}
-            >
-              {stat.icon}
-              {stat.label}
+          <Box label="Analysis server">
+            <div className="status" role="status" aria-live="polite">
+              <Mark kind={server === "ready" ? "solid" : server === "checking" ? "dashed" : "hollow"} />
+              <div>
+                {server === "checking" && <p>Checking the analysis server.</p>}
+                {server === "ready" && <p>Ready.</p>}
+                {server === "waking" && (
+                  <p>
+                    Waking up. The server runs on a free host that sleeps when idle, so the first request can take about a minute. You can search now; the lookup
+                    waits for it.
+                  </p>
+                )}
+                {server === "down" && (
+                  <>
+                    <p>The server did not answer. Give it a minute, then check again.</p>
+                    <button className="btn btn-line" style={{ marginTop: 10, minHeight: 40 }} onClick={checkServer}>
+                      Check again
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
-          ))}
-        </motion.div>
-      </motion.div>
-    </main>
+          </Box>
+        </div>
+      </main>
+      <Footer />
+    </div>
   );
 }
