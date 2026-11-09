@@ -12,6 +12,7 @@
   --hair: #bdb8a8;
   --form: #b73a18;
   --blue: #26407a;
+  --entry: #fbfbf8;
 
   --font-body: var(--font-barlow), "Barlow", system-ui, sans-serif;
   --font-label: var(--font-barlow-cond), "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
@@ -25,9 +26,11 @@
 
 html {
   background: var(--paper);
+  overflow-x: clip;
 }
 
 body {
+  overflow-x: clip;
   margin: 0;
   background: var(--paper);
   color: var(--ink);
@@ -42,7 +45,7 @@ body {
 
 ::selection {
   background: var(--form);
-  color: #fff;
+  color: var(--paper);
 }
 
 :focus-visible {
@@ -71,6 +74,11 @@ a {
   color: var(--blue);
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
+}
+h1,
+h2,
+h3 {
+  text-wrap: balance;
 }
 h1,
 h2,
@@ -159,7 +167,8 @@ button:disabled {
   background: var(--form);
 }
 .nav button:disabled {
-  opacity: 0.6;
+  background: var(--paper-2);
+  color: var(--ink-3);
 }
 
 .footer {
@@ -276,7 +285,7 @@ button:disabled {
   line-height: 1.6;
 }
 .prose-sm {
-  max-width: 76ch;
+  max-width: 72ch;
   font-size: 0.9375rem;
   line-height: 1.6;
   color: var(--ink-2);
@@ -287,7 +296,7 @@ button:disabled {
   display: flex;
   align-items: stretch;
   border: 1.5px solid var(--ink);
-  background: #fff;
+  background: var(--entry);
 }
 .entry input {
   flex: 1;
@@ -324,6 +333,11 @@ button:disabled {
 .btn:disabled {
   background: var(--paper-2);
   color: var(--ink-3);
+}
+.btn:active:not(:disabled),
+.nav button:active:not(:disabled),
+.pick:active:not(:disabled) {
+  transform: translateY(1px);
 }
 .btn-line {
   background: transparent;
@@ -783,7 +797,7 @@ table.ledger {
   align-items: center;
   gap: 10px;
   border: 1.5px solid var(--ink);
-  background: #fff;
+  background: var(--entry);
   padding: 0 12px;
   max-width: 420px;
 }

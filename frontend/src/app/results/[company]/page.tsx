@@ -44,7 +44,7 @@ function Evidence({ evidence }: { evidence?: string | null }) {
       </span>
     );
   }
-  return <span aria-label="No evidence">—</span>;
+  return <span>None</span>;
 }
 
 function sourceMarkKind(status: string): MarkKind {

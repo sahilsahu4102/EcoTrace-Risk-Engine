@@ -31,7 +31,12 @@ export function renderOgImage() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 18, fontSize: 28 }}>
           <div style={{ display: "flex", width: 26, height: 26, background: form }} />
-          <div style={{ display: "flex" }}>Trase · Forest 500 · Global Forest Watch · company sustainability pages</div>
+          <div style={{ display: "flex", gap: 28 }}>
+            <span>Trase</span>
+            <span>Forest 500</span>
+            <span>Global Forest Watch</span>
+            <span>Company sustainability pages</span>
+          </div>
         </div>
       </div>
     ),

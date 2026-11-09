@@ -111,7 +111,7 @@ export default function SupplyChainGraph({ company, breakdown }: SupplyChainGrap
 
   if (breakdown.length === 0) {
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#5a616d" }}>
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--ink-3)" }}>
         No clear supply chain trace available for this company.
       </div>
     );
