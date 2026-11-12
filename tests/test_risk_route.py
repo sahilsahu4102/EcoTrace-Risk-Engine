@@ -117,13 +117,48 @@ def test_static_fallback_is_not_reported_as_gfw_responding(sources):
 
 
 def test_mixed_live_and_fallback_countries_are_partial(sources):
-    sources.trase.return_value = {**TRASE_SOY_BRAZIL, "regions": ["Brazil", "Indonesia"]}
+    # Palm Oil makes Indonesia a scored country (Soy x Brazil, Palm Oil x Indonesia)
+    sources.trase.return_value = {**TRASE_SOY_BRAZIL, "commodities": ["Soy", "Palm Oil"],
+                                  "regions": ["Brazil", "Indonesia"]}
     sources.gfw.return_value = {**_gfw(BRA=0.8), **_gfw("fallback", IDN=0.9)}
 
     gfw = next(s for s in _analyze().sources if s.source_name == "gfw")
 
     assert gfw.status == "partial"
     assert gfw.raw_data["live_countries"] == ["BRA"]
+
+
+def test_gfw_runs_alongside_the_csr_page(sources):
+    """GFW starts on Trase's countries while the CSR page is still loading, and only the
+    country the page adds is fetched after it. Until 2026-11 GFW waited for all three sources."""
+    gfw_started = asyncio.Event()
+    calls = []
+
+    async def gfw(isos):
+        calls.append(list(isos))
+        gfw_started.set()
+        return _gfw(**dict.fromkeys(isos, 0.8))
+
+    async def scrape(company):
+        await asyncio.wait_for(gfw_started.wait(), timeout=2)  # times out if GFW waits for this page
+        return {"status": "success", "url": "https://www.acme.com/sustainability",
+                "text": "We buy palm oil from Indonesia.", "text_length": 31}
+
+    indonesia = next(r for r in REGIONS if r.name == "Indonesia")
+    sources.trase.return_value = TRASE_SOY_BRAZIL
+    sources.scrape.side_effect = scrape
+    sources.gfw.side_effect = gfw
+    sources.extract.return_value = ExtractionResult(
+        commodities=[{"name": "Palm Oil", "risk_weight": 0.95, "matched_keywords": ["palm oil"]}],
+        regions=[_region_to_dict(indonesia, "estimated", "test")],
+        operational_regions=[],
+    )
+
+    resp = _analyze()
+
+    assert _status(resp)["csr"] == "success" and _status(resp)["gfw"] == "success"
+    assert calls == [["BRA"], ["IDN"]]  # Brazil during the page fetch; afterwards only the page's new country
+    assert sorted(r.name for r in resp.regions) == ["Brazil", "Indonesia"]
 
 
 def test_category_search_reports_live_gfw_as_success(sources):

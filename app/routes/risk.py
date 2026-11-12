@@ -259,9 +259,12 @@ async def _analyze_company_direct(company: str, skip_csr: bool = False) -> RiskR
 
     trase_task = asyncio.create_task(_get_trase_data(company))
     forest500_task = asyncio.create_task(_get_forest500_data(company))
+    # GFW needs countries. Trase's come from local data in milliseconds, long before the
+    # CSR page and its LLM step finish, so GFW starts on them now and runs alongside CSR.
+    gfw_task = asyncio.create_task(_prefetch_gfw(trase_task))
 
-    csr_result, trase_result, forest500_result = await asyncio.gather(
-        csr_task, trase_task, forest500_task,
+    csr_result, trase_result, forest500_result, gfw_prefetched = await asyncio.gather(
+        csr_task, trase_task, forest500_task, gfw_task,
         return_exceptions=True,
     )
 
@@ -277,7 +280,11 @@ async def _analyze_company_direct(company: str, skip_csr: bool = False) -> RiskR
     # Show the countries that are scored; with no supported pair, show what was found
     regions = paired_regions if pairs else extraction.regions
 
-    gfw_overrides, gfw_result = await _gfw_source([r["iso_code"] for r in regions])
+    # Only countries the CSR page added are fetched now; the rest came with the prefetch
+    gfw_overrides, gfw_result = await _gfw_source(
+        [r["iso_code"] for r in regions],
+        prefetched=gfw_prefetched if isinstance(gfw_prefetched, dict) else None,
+    )
 
     forest500_score = None
     if isinstance(forest500_result, dict) and forest500_result.get("status") == "success":
@@ -589,20 +596,37 @@ def _scoring_pairs(extraction, trase: dict) -> tuple[list[tuple[str, str, str]],
     )
 
 
-async def _gfw_source(iso_codes: list[str]) -> tuple[dict[str, float], dict]:
+async def _prefetch_gfw(trase_task: asyncio.Task) -> dict[str, dict]:
+    """GFW data for the countries in the company's Trase records, fetched while CSR runs."""
+    from app.services.extraction import _REGION_LOOKUP
+
+    trase = await trase_task
+    if not (isinstance(trase, dict) and trase.get("status") == "success"):
+        return {}
+    isos = [region.iso_code for name in trase.get("regions_found", [])
+            if (region := _REGION_LOOKUP.get(str(name).lower()))]
+    return await gfw_service.get_countries(isos) if isos else {}
+
+
+async def _gfw_source(iso_codes: list[str], prefetched: dict[str, dict] | None = None) -> tuple[dict[str, float], dict]:
     """GFW risk per country, plus a source result that says how much of it was live.
 
     The service answers from region_risk_fallback.json when the API fails, so a
     returned value alone does not mean GFW responded. Only live API data earns
     the source its "success" status and its confidence points; static estimates
-    are reported as "fallback".
+    are reported as "fallback". Countries in `prefetched` (fetched while the
+    other sources ran) are not requested again.
     """
     if not iso_codes:
         return {}, _error_source("gfw", "No regions detected")
+    prefetched = prefetched or {}
+    missing = [iso for iso in dict.fromkeys(iso_codes) if iso not in prefetched]
     try:
-        countries = await gfw_service.get_countries(iso_codes)
+        fetched = await gfw_service.get_countries(missing) if missing else {}
     except Exception as e:
         return {}, _error_source("gfw", str(e))
+    countries = {iso: prefetched[iso] for iso in dict.fromkeys(iso_codes) if iso in prefetched}
+    countries.update(fetched)
 
     overrides = {iso: data.get("normalized_risk", 0.5) for iso, data in countries.items()}
     live = [iso for iso, data in countries.items() if data.get("status") == "live_api"]
