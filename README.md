@@ -7,7 +7,7 @@ An intelligent, multi-source risk assessment platform that helps consumers and e
 ![Frontend](https://img.shields.io/badge/Frontend-Next.js-black)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 
-🎥 **[Watch the Full Product Demo Video Here](https://drive.google.com/file/d/1NmSob4oo__kMoqJXP2d5VNSBq-QMZX0c/view?usp=sharing)** · 🌐 **[Live demo](https://eco-trace-risk-engine.vercel.app)** (the API runs on Render's free tier, which sleeps when idle: a first request after a quiet spell can take a minute)
+🎥 **[Watch the Full Product Demo Video Here](https://drive.google.com/file/d/1lVkef5i64DVDcbYGDRHlZZgtdV-w47Cy/view?usp=sharing)** · 🌐 **[Live demo](https://eco-trace-risk-engine.vercel.app)** (the API runs on Render's free tier, which sleeps when idle: a first request after a quiet spell can take a minute)
 
 ---
 
